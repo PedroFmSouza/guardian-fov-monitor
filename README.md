@@ -88,6 +88,35 @@ O teste de fumaça **não mudou uma linha** na migração: ele seleciona por
 de canvas, que a versão React preserva. As 28 verificações são a prova de que a
 troca de camada não mexeu em comportamento.
 
+## Visão geral da frota
+
+Painel abaixo da observação, com o **export carregado agora** e a frota inteira.
+Nada é persistido: o acompanhamento entre semanas vive no painel de observação.
+
+Quatro leituras, na ordem em que a operação pergunta: **tendência** (a frota
+melhorou?), **ranking** (quem está pior?), **hora do dia** (quando acontece?) e
+**causa raiz** (por quê?).
+
+Três decisões de leitura que valem registro:
+
+- **Uma cor por gráfico, e a mesma para todas as barras.** Colorir cada barra do
+  ranking por valor gastaria o canal de cor repetindo o que o comprimento já diz
+  e sugeriria uma ordem entre categorias nominais que não existe. Como todo
+  gráfico do painel é de série única, nenhum deles depende de o leitor separar
+  duas cores.
+- **A linha de tendência quebra nos dias sem arquivo.** Um eixo só com os dias
+  presentes colaria 19/07 em 26/07 como se fossem vizinhos e a linha atravessaria
+  uma semana inexistente. `fleetDaily` devolve a faixa contínua, com `0` para dia
+  medido sem exceção e `null` para dia que ninguém cobriu — e o vão sai
+  hachurado, pelo mesmo desenho da série do card (`drawGapBands`, em `base.js`).
+- **As causas conhecidas aparecem mesmo zeradas.** "Sensor coberto: 0" é uma
+  afirmação útil; a barra ausente deixaria o leitor sem saber se foi zero ou se a
+  causa nem é rastreada.
+
+Cada bloco traz uma frase que diz **em palavras o que o gráfico mostra** — é o
+caminho de leitura de quem não vai interpretar a forma, e o que o leitor de tela
+recebe, já que o `<canvas>` não é legível por ele.
+
 ## Estrutura
 
 | Caminho | Responsabilidade |
@@ -98,6 +127,8 @@ troca de camada não mexeu em comportamento.
 | `src/app/useReport.js` | arquivos carregados, união deduplicada, ingestão |
 | `src/app/useWatchlist.js` | lista de observação + série diária persistida |
 | `src/app/watchlist/*` | painel, card e detalhe do equipamento |
+| `src/app/overview/*` | painel de visão geral da frota |
+| `src/aggregate/overview.js` | agregações da frota (diária, hora, causa) |
 | `src/ingest/parseEventFile.js` | porta única da ingestão: escolhe o leitor **pelo conteúdo** |
 | `src/ingest/contract.js` | contrato de colunas, compartilhado por todos os leitores |
 | `src/ingest/parseWorkbook.js` | abre o .xlsx e acha a aba de eventos **pelo header** |

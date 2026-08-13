@@ -47,6 +47,7 @@ import {
   patchEntry,
 } from '../src/persistence/watchlist.js'
 import { buildVehicleDetail, WORST_DAY_PROFILES } from '../src/aggregate/vehicleDetail.js'
+import { fleetDaily, fleetByHour, fleetByCause, causeLabel } from '../src/aggregate/overview.js'
 
 const EXCEL_EPOCH = Date.UTC(1899, 11, 30)
 const serial = (iso) => (Date.parse(`${iso}Z`) - EXCEL_EPOCH) / 86400000
@@ -255,7 +256,7 @@ test('o export real do portal satisfaz o contrato inteiro de colunas', () => {
     [],
     'o .csv traz fleet, shift, crew e guardian_unit — nenhuma opcional falta',
   )
-  assert.equal(portal.header.length, 29)
+  assert.equal(portal.header.length, 30)
   assert.deepEqual(portal.header.slice(21), [
     'fleet',
     'timezone',
@@ -265,6 +266,7 @@ test('o export real do portal satisfaz o contrato inteiro de colunas', () => {
     'crew',
     'guardian_unit',
     'software_version',
+    'tags',
   ])
 })
 
@@ -357,6 +359,86 @@ test('o .xlsx em inglês não muda de contagem com o novo critério', () => {
   ])
   assert.deepEqual(rows.map((r) => r.isFov), [true, false])
   assert.equal(reclassified, 0)
+})
+
+/* ------------------------------------------- agregações da visão geral */
+
+test('fleetDaily soma a frota inteira por dia, e só o que é FOV', () => {
+  const { rows } = normalizeRows([
+    row({ event_id: 'A', vehicle: 707, detection_time: serial('2026-07-06T09:00:00') }),
+    row({ event_id: 'B', vehicle: 224, detection_time: serial('2026-07-06T20:00:00') }),
+    row({ event_id: 'C', vehicle: 707, detection_time: serial('2026-07-08T09:00:00') }),
+    // não-FOV não entra na contagem, mesmo sendo do mesmo dia
+    row({
+      event_id: 'D',
+      event_type: 'fadiga',
+      classification: 'fadiga - x',
+      detection_time: serial('2026-07-06T09:00:00'),
+    }),
+  ])
+  const daily = fleetDaily(rows)
+  // faixa contínua: 07/07 existe no eixo mesmo sem nenhum arquivo cobrindo
+  assert.deepEqual(daily.days, ['2026-07-06', '2026-07-07', '2026-07-08'])
+  assert.deepEqual(daily.total, [2, null, 1], 'dia sem arquivo é null, não zero')
+  assert.deepEqual(daily.shift1, [1, null, 1])
+  assert.deepEqual(daily.shift2, [1, null, 0])
+  assert.equal(daily.missing, 1)
+  assert.equal(daily.covered, 2)
+})
+
+test('fleetDaily separa dia coberto sem FOV de dia sem arquivo', () => {
+  const { rows } = normalizeRows([
+    row({ event_id: 'A', detection_time: serial('2026-07-06T09:00:00') }),
+    // 07/07 tem evento, mas não é FOV: o dia foi medido e deu zero
+    row({
+      event_id: 'B',
+      event_type: 'fadiga',
+      classification: 'fadiga - x',
+      detection_time: serial('2026-07-07T09:00:00'),
+    }),
+    row({ event_id: 'C', detection_time: serial('2026-07-09T09:00:00') }),
+  ])
+  const daily = fleetDaily(rows)
+  assert.deepEqual(daily.days, ['2026-07-06', '2026-07-07', '2026-07-08', '2026-07-09'])
+  assert.deepEqual(daily.total, [1, 0, null, 1], '0 = medido e sem exceção; null = não medido')
+})
+
+test('fleetByHour devolve sempre 24 posições e acha o pico', () => {
+  const at = (h, n) =>
+    Array.from({ length: n }, (_, i) => row({ event_id: `${h}-${i}`, detection_time: serial(`2026-07-06T${String(h).padStart(2, '0')}:30:00`) }))
+  const { rows } = normalizeRows([...at(5, 3), ...at(17, 5), ...at(9, 1)])
+  const profile = fleetByHour(rows)
+  assert.equal(profile.hours.length, 24)
+  assert.equal(profile.total, 9)
+  assert.equal(profile.peakHour, 17)
+  assert.equal(profile.hours[5], 3)
+  assert.equal(profile.hours[0], 0, 'hora sem evento é 0, não ausente')
+})
+
+test('fleetByCause mantém as causas conhecidas mesmo zeradas', () => {
+  const { rows } = normalizeRows([
+    row({ event_id: 'A', classification: 'FOV exception - camera misaligned' }),
+    row({ event_id: 'B', classification: 'FOV exception - camera misaligned' }),
+    row({ event_id: 'C', classification: 'FOV exception - tracking issue' }),
+  ])
+  const causes = fleetByCause(rows)
+  const byKey = Object.fromEntries(causes.map((c) => [c.cause, c]))
+
+  assert.equal(byKey['camera misaligned'].count, 2)
+  assert.equal(byKey['camera misaligned'].label, 'Câmera desalinhada')
+  assert.ok(Math.abs(byKey['camera misaligned'].share - 2 / 3) < 1e-9)
+  // "sensor coberto: 0" é afirmação útil; a ausência da barra não seria
+  assert.equal(byKey['sensor covered'].count, 0)
+  assert.deepEqual(
+    causes.map((c) => c.count),
+    [2, 1, 0],
+    'ordenado por contagem decrescente',
+  )
+})
+
+test('causeLabel traduz o que conhece e capitaliza o resto', () => {
+  assert.equal(causeLabel('tracking issue'), 'Problema de rastreamento')
+  assert.equal(causeLabel('critérios não atendidos'), 'Critérios não atendidos')
 })
 
 /* ---------------------------- dias sem cobertura (buraco na série diária) */

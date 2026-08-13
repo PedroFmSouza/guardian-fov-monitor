@@ -5,6 +5,7 @@ import { fmtInt } from '../ui/kpis.js'
 import { Header, Metagrid, Footer } from './Chrome.jsx'
 import { ChartThemeContext } from './hooks.js'
 import { Ingest } from './Ingest.jsx'
+import { OverviewPanel } from './overview/OverviewPanel.jsx'
 import { useReport } from './useReport.js'
 import { useWatchlist } from './useWatchlist.js'
 import { WatchlistPanel } from './watchlist/WatchlistPanel.jsx'
@@ -118,6 +119,21 @@ export function App() {
             </div>
             <div id="watchlist-host">
               <WatchlistPanel watchlist={watchlist} rows={report.rows} meta={report.meta} />
+            </div>
+          </section>
+
+          <section className="panel" aria-label="Visão geral da frota">
+            <div className="panel__head">
+              <h2 className="panel__title">Visão geral da frota</h2>
+              <p className="panel__sub">
+                Leitura do <strong>export carregado agora</strong>, com a frota inteira: para onde a
+                tendência aponta, quais equipamentos estão piores, em que hora do dia acontece e por
+                quê. Nada aqui é persistido nem atravessa uploads — o acompanhamento entre semanas
+                vive no painel de observação, acima.
+              </p>
+            </div>
+            <div id="overview-host">
+              <OverviewPanel rows={report.rows} />
             </div>
           </section>
         </main>

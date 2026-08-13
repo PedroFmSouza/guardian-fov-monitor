@@ -1289,3 +1289,54 @@ body {
     display: none !important;
   }
 }
+
+/* ================================================= visão geral da frota */
+
+/* Dois blocos por linha em tela larga; a tendência ocupa a linha inteira
+   porque o eixo do tempo precisa de largura para os rótulos não colidirem. */
+.ov-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: var(--space-6) var(--space-5);
+  align-items: start;
+}
+
+/* hora + causa empilhadas ao lado do ranking, que é alto por natureza */
+.ov-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.ov-block--wide {
+  grid-column: 1 / -1;
+}
+
+.ov-block__title {
+  margin: 0 0 var(--space-1);
+  font-family: var(--cond);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+/* O que o gráfico diz, em palavras. Não é enfeite: é o caminho de leitura de
+   quem não vai interpretar a forma — e do leitor de tela, que não vê o canvas. */
+.ov-block__reading {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  max-width: 62ch;
+}
+
+/* Altura por número de barras: container de altura fixa cortaria o eixo x e
+   criaria um scroll aninhado dentro do bloco. */
+.chartbox--rank {
+  height: 358px;
+}
+
+.chartbox--cause {
+  height: 168px;
+}

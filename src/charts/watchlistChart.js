@@ -1,60 +1,5 @@
-import { mount, C, FONT_COND, applyChartDefaults, withAlpha } from './base.js'
+import { mount, C, FONT_COND, drawGapBands, applyChartDefaults } from './base.js'
 import { OBS_STATUS } from '../aggregate/byDailyVehicle.js'
-
-/**
- * Faixa hachurada sobre trechos em que as linhas não têm o que plotar.
- *
- * São DOIS motivos diferentes, e a faixa diz qual:
- *  · `SEM DADO`  — nenhum arquivo carregado cobre o dia;
- *  · `SEM TURNO` — o dia existe e conta nos vereditos, mas foi gravado no
- *                  formato antigo (só o total, sem divisão por turno).
- *
- * A linha quebra nos dois casos de propósito (`spanGaps: false`) — plotar zero
- * afirmaria que o turno não teve exceção. Sem a faixa, porém, a quebra é
- * indistinguível de um defeito de renderização: é a diferença entre "o gráfico
- * bugou" e "faltam exports desses dias".
- */
-function drawGapBands(ctx, chartArea, scales, runs, { label, color }) {
-  if (!Array.isArray(runs) || !runs.length) return
-  const { top, bottom, left, right } = chartArea
-  const height = bottom - top
-  // largura de um dia no eixo de categorias; com um dia só não há vão a marcar
-  const step = Math.abs(scales.x.getPixelForValue(1) - scales.x.getPixelForValue(0))
-  if (!Number.isFinite(step) || step <= 0) return
-
-  for (const [from, to] of runs) {
-    const x0 = Math.max(left, scales.x.getPixelForValue(from) - step / 2)
-    const x1 = Math.min(right, scales.x.getPixelForValue(to) + step / 2)
-    if (!(x1 > x0)) continue // trecho inteiro fora do enquadramento atual
-
-    ctx.save()
-    ctx.beginPath()
-    ctx.rect(x0, top, x1 - x0, height)
-    ctx.clip()
-    ctx.fillStyle = withAlpha(color, 0.1)
-    ctx.fillRect(x0, top, x1 - x0, height)
-
-    // hachura diagonal: lê como "área sem medição" sem competir com as séries
-    ctx.strokeStyle = withAlpha(color, 0.3)
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    for (let x = x0 - height; x < x1; x += 7) {
-      ctx.moveTo(x, bottom)
-      ctx.lineTo(x + height, top)
-    }
-    ctx.stroke()
-    ctx.restore()
-
-    if (x1 - x0 >= 46) {
-      ctx.save()
-      ctx.fillStyle = color
-      ctx.font = `9px ${FONT_COND}`
-      ctx.textAlign = 'center'
-      ctx.fillText(label, (x0 + x1) / 2, top + 10)
-      ctx.restore()
-    }
-  }
-}
 
 /**
  * Marcações da observação, desenhadas em um plugin local — evita depender de
@@ -226,7 +171,10 @@ export function renderWatchlistChart(canvasId, days, values, opts) {
                 mode: 'x',
               },
             }
-          : { pan: { enabled: false }, zoom: { wheel: { enabled: false }, pinch: { enabled: false } } },
+          : {
+              pan: { enabled: false },
+              zoom: { wheel: { enabled: false }, pinch: { enabled: false } },
+            },
       },
       scales: {
         x: {

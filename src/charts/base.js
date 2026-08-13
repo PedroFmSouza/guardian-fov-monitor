@@ -72,6 +72,85 @@ export function withAlpha(color, alpha) {
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
 }
 
+/**
+ * Faixa hachurada sobre trechos em que a linha não tem o que plotar.
+ *
+ * Compartilhada por todos os gráficos de série temporal do app, porque o
+ * problema é o mesmo em todos: a linha quebra de propósito (`spanGaps: false`)
+ * quando o dia não tem dado — plotar zero afirmaria que não houve exceção num
+ * dia que ninguém mediu. Sem a faixa, porém, a quebra é indistinguível de um
+ * defeito de renderização: é a diferença entre "o gráfico bugou" e "faltam
+ * exports desses dias".
+ *
+ * O rótulo diz QUAL é o motivo, que nem sempre é o mesmo — daí ser parâmetro:
+ *  · `SEM DADO`  — nenhum arquivo carregado cobre o dia;
+ *  · `SEM TURNO` — o dia existe e conta nos vereditos, mas foi gravado sem a
+ *                  divisão por turno.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {{top: number, bottom: number, left: number, right: number}} chartArea
+ * @param {object} scales escalas do Chart.js (usa a x)
+ * @param {number[][]} runs pares [início, fim] de índices inclusivos
+ * @param {{label: string, color: string}} opts
+ */
+export function drawGapBands(ctx, chartArea, scales, runs, { label, color }) {
+  if (!Array.isArray(runs) || !runs.length) return
+  const { top, bottom, left, right } = chartArea
+  const height = bottom - top
+  // largura de um passo no eixo; com um ponto só não há vão a marcar
+  const step = Math.abs(scales.x.getPixelForValue(1) - scales.x.getPixelForValue(0))
+  if (!Number.isFinite(step) || step <= 0) return
+
+  for (const [from, to] of runs) {
+    const x0 = Math.max(left, scales.x.getPixelForValue(from) - step / 2)
+    const x1 = Math.min(right, scales.x.getPixelForValue(to) + step / 2)
+    if (!(x1 > x0)) continue // trecho inteiro fora do enquadramento atual
+
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(x0, top, x1 - x0, height)
+    ctx.clip()
+    ctx.fillStyle = withAlpha(color, 0.1)
+    ctx.fillRect(x0, top, x1 - x0, height)
+
+    // hachura diagonal: lê como "área sem medição" sem competir com as séries
+    ctx.strokeStyle = withAlpha(color, 0.3)
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    for (let x = x0 - height; x < x1; x += 7) {
+      ctx.moveTo(x, bottom)
+      ctx.lineTo(x + height, top)
+    }
+    ctx.stroke()
+    ctx.restore()
+
+    if (x1 - x0 >= 46) {
+      ctx.save()
+      ctx.fillStyle = color
+      ctx.font = `9px ${FONT_COND}`
+      ctx.textAlign = 'center'
+      ctx.fillText(label, (x0 + x1) / 2, top + 10)
+      ctx.restore()
+    }
+  }
+}
+
+/** Trechos contínuos de `null` numa série — os vãos que a faixa marca. */
+export function nullRuns(values) {
+  const runs = []
+  let start = -1
+  for (let i = 0; i < values.length; i++) {
+    const empty = values[i] === null || values[i] === undefined
+    if (empty && start === -1) start = i
+    else if (!empty && start !== -1) {
+      runs.push([start, i - 1])
+      start = -1
+    }
+  }
+  if (start !== -1) runs.push([start, values.length - 1])
+  return runs
+}
+
 let defaultsApplied = false
 
 /**
