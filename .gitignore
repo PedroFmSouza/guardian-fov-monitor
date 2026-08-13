@@ -1,0 +1,23 @@
+node_modules/
+dist/
+
+# Dados do Guardian NUNCA são versionados. O export traz identificação da
+# operação, do equipamento e coordenadas GPS do local — nada disso entra no
+# repositório. `sample/` é inteiramente gerado por `npm run sample`; a única
+# amostra versionada é tests/fixtures/, com a estrutura real e valores fictícios.
+*.xlsx
+*.xls
+sample/
+
+# Ferramentas locais: guardam caminhos absolutos da máquina de quem rodou
+# (usuário, pastas corporativas) e conteúdo de terceiros.
+.claude/
+*.local
+.env
+.env.*
+
+# artefatos de execução
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
