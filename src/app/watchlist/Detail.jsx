@@ -1,6 +1,6 @@
 import { renderWorstDayChart } from '../../charts/worstDayChart.js'
 import { renderShiftChart } from '../../charts/shiftChart.js'
-import { WORST_DAY_PROFILES } from '../../aggregate/vehicleDetail.js'
+import { WORST_DAY_PROFILES, WORST_DAY_PROFILES_UNSPLIT } from '../../aggregate/vehicleDetail.js'
 import { useChart } from '../hooks.js'
 import { dayCanvasIdFor, shiftCanvasIdFor, dm, dow, exc, hh, fmtInt } from './shared.js'
 
@@ -19,7 +19,7 @@ export function dayZonesOf(detail) {
     return [
       {
         key: 'all',
-        label: 'Piores dias do export',
+        label: 'Piores dias do período',
         // situação do dia, para o leitor de tela: sem data não há lado nenhum
         context: 'sem data de manutenção definida',
         side: detail.all,
@@ -191,7 +191,7 @@ function WorstDayZones({ vehicle, detail }) {
       <p className="wl-detail__meta">
         {zones.length > 1
           ? `Todos os gráficos acima usam a mesma escala vertical — inclusive entre as duas zonas —, então a altura de um pico antes da manutenção pode ser comparada diretamente com a de depois.`
-          : `Os gráficos acima usam a mesma escala vertical, então as alturas podem ser comparadas entre si. Informe a data da manutenção para separar os dias em antes e depois.`}
+          : `Os ${WORST_DAY_PROFILES_UNSPLIT} piores dias do período, na mesma escala vertical — as alturas podem ser comparadas entre si. Informe a data da manutenção para separá-los em antes e depois, com o mesmo total de gráficos.`}
       </p>
     </>
   )
@@ -278,13 +278,18 @@ function ShiftBlock({ vehicle, detail, maintenanceDate }) {
   )
 }
 
-/** Detalhe do equipamento: sempre partido em antes × depois da manutenção. */
+/**
+ * Detalhe do equipamento — partido em antes × depois quando há data de
+ * manutenção, e numa zona única de mesmo tamanho quando não há.
+ */
 export function Detail({ vehicle, detail, res, maintenanceDate }) {
   return (
     <div className="wl-detail">
       <div className="wl-detail__block">
         <h4 className="wl-detail__title">
-          Piores dias hora a hora — até {WORST_DAY_PROFILES} por lado da manutenção
+          {maintenanceDate
+            ? `Piores dias hora a hora — até ${WORST_DAY_PROFILES} por lado da manutenção`
+            : `Piores dias hora a hora — até ${WORST_DAY_PROFILES_UNSPLIT} do período`}
         </h4>
         <WorstDayZones vehicle={vehicle} detail={detail} />
       </div>
@@ -304,8 +309,17 @@ export function Detail({ vehicle, detail, res, maintenanceDate }) {
         )}
         <ShiftBlock vehicle={vehicle} detail={detail} maintenanceDate={maintenanceDate} />
         <p className="wl-detail__meta">
-          Limiar de reincidência <b className="mono">{res.threshold.toFixed(1)}</b>/dia · baseline{' '}
-          <b className="mono">{res.preMean.toFixed(2)}</b>/dia em {res.preDays}d ·{' '}
+          {/* Sem data não há baseline, e sem baseline não há limiar: anunciar
+              "limiar 2.0/dia em 0d" seria inventar um critério que ninguém
+              está aplicando — o veredito do card é "sem data", não um número. */}
+          {maintenanceDate ? (
+            <>
+              Limiar de reincidência <b className="mono">{res.threshold.toFixed(1)}</b>/dia ·
+              baseline <b className="mono">{res.preMean.toFixed(2)}</b>/dia em {res.preDays}d ·{' '}
+            </>
+          ) : (
+            <>Sem data de manutenção não há baseline nem limiar de reincidência · </>
+          )}
           {detail.driverCount ? (
             <>
               <b className="mono">{fmtInt(detail.driverCount)}</b> operador(es) distinto(s) no

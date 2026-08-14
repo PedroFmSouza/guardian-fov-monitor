@@ -17,8 +17,17 @@ import { dayCount } from './byDailyVehicle.js'
 
 /** Quantos dias piores listar no detalhe. */
 export const WORST_DAYS = 5
-/** Quantos dias piores desenhar como perfil horário (um gráfico cada). */
+/** Quantos dias piores desenhar como perfil horário (um gráfico cada), POR LADO. */
 export const WORST_DAY_PROFILES = 3
+/**
+ * Teto da zona única, usada quando não há data de manutenção.
+ *
+ * É a soma dos dois lados de propósito: sem data o bloco tem uma zona só, e
+ * mostrar só 3 gráficos faria a grade encolher pela metade em relação ao card
+ * com data. O leitor veria dois blocos de tamanhos diferentes sem que o dado
+ * justificasse — e o motivo (falta a data) não estaria em lugar nenhum.
+ */
+export const WORST_DAY_PROFILES_UNSPLIT = WORST_DAY_PROFILES * 2
 
 const emptySide = () => ({
   events: 0,
@@ -146,18 +155,20 @@ export function buildVehicleDetail(rows, vehicle, maintenanceDate, byDay = {}) {
     peakHour: peakOf(d.hours),
     after: Boolean(maintenanceDate && d.day > maintenanceDate),
   })
-  const worstOf = (list) =>
+  const worstOf = (list, limit = WORST_DAY_PROFILES) =>
     list
       .slice()
       .sort((a, b) => b.total - a.total || (a.day < b.day ? -1 : 1))
-      .slice(0, WORST_DAY_PROFILES)
+      .slice(0, limit)
       .map(decorate)
 
   const dayProfilesByZone = {
     before: worstOf(dayProfiles.filter((d) => maintenanceDate && d.day < maintenanceDate)),
     after: worstOf(dayProfiles.filter((d) => maintenanceDate && d.day > maintenanceDate)),
-    // sem data de manutenção não há dois lados: o card cai numa zona única
-    all: worstOf(dayProfiles),
+    // Sem data de manutenção não há dois lados: o card cai numa zona única, e
+    // ela recebe o teto dos dois somados para que a grade do bloco tenha o
+    // mesmo tamanho nos dois casos.
+    all: worstOf(dayProfiles, WORST_DAY_PROFILES_UNSPLIT),
   }
 
   const worstDays = Object.entries(byDay || {})

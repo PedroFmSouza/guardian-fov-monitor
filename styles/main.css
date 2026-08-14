@@ -1028,9 +1028,13 @@ body {
 /* Small multiples: três dias lado a lado, mesma escala vertical. Abaixo de
    três colunas a comparação ainda funciona — o que não pode é o cartão
    encolher a ponto do gráfico virar um risco. */
+/* Três colunas na largura do card aberto, com ou sem data de manutenção: com
+   data são duas zonas de 3, sem data uma zona de 6 — e nos dois casos as linhas
+   fecham em 3. Com o piso antigo (190px) cabiam 4 por linha, então a zona única
+   saía 4+2, com cards mais estreitos que os do card ao lado. */
 .wl-daygrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
   gap: var(--space-3);
 }
 

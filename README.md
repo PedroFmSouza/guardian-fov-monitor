@@ -267,6 +267,17 @@ indicados manualmente e ficam em observação para responder uma pergunta só �
   guarda `{ s1, s2 }` por dia; séries gravadas no formato antigo (só o total)
   continuam valendo para os vereditos, mas ficam sem linha — o total existe, a
   divisão não, e plotar zero afirmaria que aquele turno não teve evento.
+- **Sem data de manutenção o card não encolhe.** O bloco de piores dias cai numa
+  zona única, mas com o teto dos DOIS lados somados (`WORST_DAY_PROFILES_UNSPLIT`),
+  e a grade fecha em 3 por linha nos dois casos. Antes a zona única herdava o teto
+  de um lado só e o bloco saía com metade dos gráficos, em cards mais estreitos —
+  uma diferença de tamanho que o dado não justificava e cujo motivo não estava
+  escrito em lugar nenhum. Nada é rotulado como "depois" de uma data que não existe.
+- **Sem data também não há limiar.** `evaluateObservation` devolve
+  `RECURRENCE_FLOOR` como valor de partida no estado vazio; passar isso ao gráfico
+  desenhava uma linha `LIMIAR` sobre a série sem baseline, sem janela pós e sem
+  avaliação nenhuma por trás. O card agora diz que não há critério, em vez de
+  exibir um número inventado.
 - **Detalhar** (por equipamento) abre, sempre partido em antes × depois da
   manutenção: hora do dia, turno, causa raiz, duração (mediana/P90) e os dias
   piores da série acumulada, mais o **pior turno** — decidido pelo pós-manutenção

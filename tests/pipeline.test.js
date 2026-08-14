@@ -46,7 +46,11 @@ import {
   removeEntry,
   patchEntry,
 } from '../src/persistence/watchlist.js'
-import { buildVehicleDetail, WORST_DAY_PROFILES } from '../src/aggregate/vehicleDetail.js'
+import {
+  buildVehicleDetail,
+  WORST_DAY_PROFILES,
+  WORST_DAY_PROFILES_UNSPLIT,
+} from '../src/aggregate/vehicleDetail.js'
 import { fleetDaily, fleetByHour, fleetByCause, causeLabel } from '../src/aggregate/overview.js'
 
 const EXCEL_EPOCH = Date.UTC(1899, 11, 30)
@@ -811,7 +815,10 @@ test('sem data de manutenção o bloco cai numa zona única', () => {
   const d = buildVehicleDetail(rows, '707', null, {})
   assert.equal(d.dayProfiles.before.length, 0, 'sem data não há lado "antes"')
   assert.equal(d.dayProfiles.after.length, 0, 'sem data não há lado "depois"')
-  assert.equal(d.dayProfiles.all.length, WORST_DAY_PROFILES)
+  // 4 dias com exceção, teto de 6: entram todos — a zona única não é limitada
+  // ao teto de UM lado, senão a grade encolheria pela metade sem data
+  assert.equal(d.dayProfiles.all.length, 4)
+  assert.ok(d.dayProfiles.all.length <= WORST_DAY_PROFILES_UNSPLIT)
   assert.ok(d.dayProfiles.all.every((p) => p.after === false), 'sem eixo, nada é "depois"')
 })
 
@@ -848,6 +855,37 @@ test('sem data de manutenção o detalhe não força um lado vazio', () => {
   const d = buildVehicleDetail(rows, '707', null, {})
   assert.equal(d.all.fov, 1)
   assert.equal(d.hasSplit, false)
+})
+
+test('a zona única sem data cabe o mesmo tanto de gráficos que os dois lados', () => {
+  // 10 dias com exceção: sobra dia para os dois casos encherem o teto
+  const rows = []
+  for (let i = 0; i < 10; i++) {
+    const day = `2026-07-${String(10 + i).padStart(2, '0')}`
+    for (let n = 0; n <= i; n++) {
+      rows.push(row({ event_id: `${day}-${n}`, vehicle: 707, detection_time: `${day} 09:00:00` }))
+    }
+  }
+  const { rows: normalized } = normalizeRows(rows)
+
+  const semData = buildVehicleDetail(normalized, '707', null, {})
+  assert.equal(semData.dayProfiles.all.length, WORST_DAY_PROFILES_UNSPLIT)
+  assert.equal(semData.dayProfiles.before.length, 0)
+  assert.equal(semData.dayProfiles.after.length, 0)
+
+  const comData = buildVehicleDetail(normalized, '707', '2026-07-15', {})
+  const comDataTotal = comData.dayProfiles.before.length + comData.dayProfiles.after.length
+  assert.equal(comData.dayProfiles.before.length, WORST_DAY_PROFILES)
+  assert.equal(comData.dayProfiles.after.length, WORST_DAY_PROFILES)
+  assert.equal(
+    semData.dayProfiles.all.length,
+    comDataTotal,
+    'a grade do bloco tem o mesmo tamanho com e sem data',
+  )
+
+  // e continua ordenada por volume, decrescente
+  const totals = semData.dayProfiles.all.map((d) => d.total)
+  assert.deepEqual(totals, [...totals].sort((a, b) => b - a))
 })
 
 test('equipamento fora do export atual é sinalizado, não quebra', () => {

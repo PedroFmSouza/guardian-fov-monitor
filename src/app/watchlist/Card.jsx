@@ -71,7 +71,11 @@ function DailySeries({ vehicle, byDay, days, res, maintenanceDate, isOpen }) {
       renderWatchlistChart(id, days, values, {
         maintenanceDate,
         status: res.status,
-        threshold: res.threshold,
+        // Sem data de manutenção não há baseline, e `evaluateObservation`
+        // devolve o piso (RECURRENCE_FLOOR) só como valor de partida. Passá-lo
+        // adiante desenhava uma linha LIMIAR sobre a série sem que critério
+        // nenhum estivesse sendo aplicado.
+        threshold: maintenanceDate ? res.threshold : null,
         recurrenceDays: res.recurrenceDays,
         // os mesmos buracos, marcados na área do gráfico — separados por motivo
         gaps: missingDayRuns(days, byDay),
@@ -80,7 +84,7 @@ function DailySeries({ vehicle, byDay, days, res, maintenanceDate, isOpen }) {
         // rolando a página em vez de ampliar uma miniatura de 132px.
         zoom: isOpen,
       }),
-    `${days.join()}|${values.shift1.join()}|${values.shift2.join()}|${res.status}|${res.threshold}|${isOpen}`,
+    `${days.join()}|${values.shift1.join()}|${values.shift2.join()}|${res.status}|${maintenanceDate || ''}|${res.threshold}|${isOpen}`,
   )
 
   return (
