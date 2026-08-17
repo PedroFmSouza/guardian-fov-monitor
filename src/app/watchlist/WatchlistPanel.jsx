@@ -153,7 +153,7 @@ function Legend() {
  * manualmente, acompanhados dia a dia para responder uma pergunta só — o
  * problema voltou?
  */
-export function WatchlistPanel({ watchlist, rows, meta, range }) {
+export function WatchlistPanel({ watchlist, rows, meta, range, cause }) {
   const { entries, defaultDate, daily, add, remove, patch, setDefaultDate } = watchlist
   /** Cards com o detalhe aberto. Estado só de tela: não persiste. */
   const [expanded, setExpanded] = useState(() => new Set())
@@ -172,8 +172,11 @@ export function WatchlistPanel({ watchlist, rows, meta, range }) {
     return [...known].sort((a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true }))
   }, [daily, meta])
 
-  const ordered = useMemo(() => sortObservation(entries, daily), [entries, daily])
-  const sum = useMemo(() => summarizeObservation(entries, daily), [entries, daily])
+  const ordered = useMemo(() => sortObservation(entries, daily, cause), [entries, daily, cause])
+  const sum = useMemo(
+    () => summarizeObservation(entries, daily, cause),
+    [entries, daily, cause],
+  )
 
   return (
     <>
@@ -194,6 +197,7 @@ export function WatchlistPanel({ watchlist, rows, meta, range }) {
               byDay={daily[entry.vehicle] || EMPTY}
               rows={rows}
               range={range}
+              cause={cause}
               isOpen={expanded.has(entry.vehicle)}
               onToggle={toggle}
               onRemove={remove}

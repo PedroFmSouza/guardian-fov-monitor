@@ -385,32 +385,63 @@ body {
   white-space: nowrap;
 }
 
-/* ------------------------------------------------------- filtro de período */
+/* ------------------------------------------------------- recorte do que é exibido */
 
-.datefilter {
+.viewfilter {
   padding: var(--space-4) var(--gut);
 }
 
-.datefilter__row {
+.viewfilter__row {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--space-4);
 }
 
-.datefilter__quick {
+.viewfilter__quick {
   display: flex;
   gap: var(--space-2);
   /* alinha com a base dos campos, que têm rótulo acima */
   padding-bottom: 1px;
 }
 
-.datefilter__note {
+.viewfilter__note {
   margin: 0;
   padding-bottom: var(--space-1);
   flex: 1 1 260px;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+}
+
+/* O <select> nativo não herda a caixa dos inputs de texto em todos os motores. */
+select.field__input {
+  appearance: none;
+  padding-right: var(--space-6);
+  cursor: pointer;
+  /* seta desenhada em CSS: nenhuma requisição de imagem, e acompanha a cor do tema */
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) calc(50% + 1px),
+    calc(100% - 9px) calc(50% + 1px);
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+/* Atalho que não tem como estreitar o arquivo carregado: continua clicável
+   (volta a ser útil quando há um recorte mais estreito ativo), mas anuncia que
+   nada vai mudar em vez de deixar o clique cair no vazio. */
+.btn--inert {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+/* Campo que está de fato recortando — mesma leitura visual do .btn--on. */
+.field__input--on {
+  border-color: var(--color-primary);
+  background-color: var(--color-primary-subtle);
+  color: var(--color-primary);
+  font-weight: 600;
 }
 
 /* -------------------------------------------------------------- dropzone */

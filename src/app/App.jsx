@@ -4,11 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { refreshColorTokens } from '../charts/base.js'
 import { fmtInt } from '../ui/kpis.js'
 import { Header, Metagrid, Footer } from './Chrome.jsx'
-import { DateFilter } from './DateFilter.jsx'
+import { ViewFilter } from './ViewFilter.jsx'
 import { ChartThemeContext } from './hooks.js'
 import { Ingest } from './Ingest.jsx'
 import { OverviewPanel } from './overview/OverviewPanel.jsx'
-import { useDateFilter } from './useDateFilter.js'
+import { useViewFilter } from './useViewFilter.js'
 import { useReport } from './useReport.js'
 import { useWatchlist } from './useWatchlist.js'
 import { today } from './watchlist/shared.js'
@@ -19,11 +19,11 @@ export function App() {
   const report = useReport(watchlist.mergeSeries)
 
   /**
-   * Recorte por data da LEITURA. Deriva das linhas já unidas, depois da
-   * ingestão: o que o filtro esconde nunca deixou de ser gravado na série
-   * diária do painel de observação.
+   * Recorte da LEITURA — período e causa raiz. Deriva das linhas já unidas,
+   * depois da ingestão: o que o filtro esconde nunca deixou de ser gravado na
+   * série diária do painel de observação.
    */
-  const filter = useDateFilter(report.rows, report.meta)
+  const filter = useViewFilter(report.rows, report.meta)
 
   // Chart.js grava as cores no dataset na montagem e não referencia o CSS ao
   // vivo. Trocar o tema exige reler os tokens e REMONTAR os gráficos — o
@@ -126,7 +126,7 @@ export function App() {
         <main id="main-content" tabIndex={-1}>
           <Metagrid cells={cells} />
 
-          {meta ? <DateFilter filter={filter} fullMeta={meta} /> : null}
+          {meta ? <ViewFilter filter={filter} fullMeta={meta} /> : null}
 
           <section className="panel" aria-label="Carga de dados">
             <div className="panel__head">
@@ -155,10 +155,12 @@ export function App() {
                 detectar se a falha volta a ocorrer. Cada equipamento tem sua própria data de
                 manutenção; a série diária é acumulada entre uploads e deduplicada por data. Use{' '}
                 <strong>Detalhar</strong> para abrir hora do dia, causa raiz e duração do
-                equipamento, comparando antes e depois da manutenção. O gráfico de cada card desenha
-                apenas o <strong>período exibido</strong>, para não misturar semanas que não estão em
-                nenhum arquivo aberto; o <strong>veredito</strong> de reincidência continua contado
-                sobre a série acumulada inteira, e o card avisa quantos dias ficaram fora do desenho.
+                equipamento, comparando antes e depois da manutenção. Os cards seguem o recorte
+                acima: o gráfico desenha apenas o <strong>período exibido</strong>, e com uma causa
+                isolada o gráfico, as médias e o veredito passam a valer só para ela. Dias gravados
+                antes de a série guardar a causa não sabem responder — ficam hachurados e fora das
+                contas, contados no card como <span className="mono">sem causa</span>. Recarregar os
+                exports daqueles dias preenche.
               </p>
             </div>
             <div id="watchlist-host">
@@ -167,6 +169,7 @@ export function App() {
                 rows={report.rows}
                 meta={report.meta}
                 range={filter.range}
+                cause={filter.cause}
               />
             </div>
           </section>
@@ -177,20 +180,21 @@ export function App() {
               <p className="panel__sub">
                 Leitura do <strong>período exibido</strong>, com a frota inteira: para onde a
                 tendência aponta, quais equipamentos estão piores, em que hora do dia acontece e por
-                quê. Segue o filtro de período acima. Nada aqui é persistido nem atravessa uploads —
-                o acompanhamento entre semanas vive no painel de observação, acima.
+                quê. Segue o recorte de período e causa acima. Nada aqui é persistido nem atravessa
+                uploads — o acompanhamento entre semanas vive no painel de observação, acima.
               </p>
             </div>
             <div id="overview-host">
               <OverviewPanel
                 rows={filter.rows}
+                cause={filter.cause}
                 observed={observed}
                 onObserve={observeTop}
                 defaultDate={observeDate}
                 emptyReason={
                   !meta
                     ? 'Carregue um export para ver a visão geral da frota — tendência, ranking, hora do dia e causa raiz.'
-                    : 'Nenhum registro no período filtrado. Amplie o intervalo acima ou use "Tudo".'
+                    : 'Nenhum registro no recorte atual. Amplie o intervalo, use "Tudo" ou volte para todas as causas.'
                 }
               />
             </div>

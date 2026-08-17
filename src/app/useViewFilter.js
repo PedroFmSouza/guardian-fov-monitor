@@ -1,11 +1,13 @@
 import { useCallback, useMemo, useState } from 'react'
 
+import { availableCauses, filterRowsByCause } from '../data/causeFilter.js'
 import {
   clampRange,
   filterRowsByRange,
   isEmptyRange,
   isFullRange,
   lastNDays,
+  rangeLengthDays,
 } from '../data/dateRange.js'
 import { datasetMeta } from '../data/normalize.js'
 
@@ -25,7 +27,7 @@ const EMPTY_META = {
 }
 
 /**
- * Recorte por data da leitura na tela.
+ * Recorte da leitura na tela: período e causa raiz.
  *
  * O intervalo é guardado CRU, como o usuário digitou, e resolvido contra o
  * período carregado a cada render. Guardar já grampeado parece mais simples e
@@ -37,8 +39,10 @@ const EMPTY_META = {
  * @param {object[]} rows união deduplicada de todos os arquivos
  * @param {object|null} meta metadados do período INTEIRO
  */
-export function useDateFilter(rows, meta) {
+export function useViewFilter(rows, meta) {
   const [range, setRange] = useState({ from: null, to: null })
+  /** Chave canônica da causa isolada; `null` mostra todas. */
+  const [cause, setCause] = useState(null)
 
   const bounds = useMemo(
     () => ({
@@ -52,12 +56,18 @@ export function useDateFilter(rows, meta) {
   const effective = useMemo(() => clampRange(range, bounds), [range, bounds])
 
   const empty = isEmptyRange(effective)
-  const active = !isFullRange(range, bounds)
+  const dateActive = !isFullRange(range, bounds)
+  const active = dateActive || Boolean(cause)
 
-  const filteredRows = useMemo(
-    () => filterRowsByRange(rows, effective),
-    [rows, effective],
-  )
+  /**
+   * Causas oferecidas no seletor. Saem do dado JÁ RECORTADO POR DATA, mas nunca
+   * da própria causa selecionada — senão escolher uma causa apagaria as outras
+   * da lista e não haveria como voltar sem limpar tudo.
+   */
+  const byDate = useMemo(() => filterRowsByRange(rows, effective), [rows, effective])
+  const causes = useMemo(() => availableCauses(byDate), [byDate])
+
+  const filteredRows = useMemo(() => filterRowsByCause(byDate, cause), [byDate, cause])
 
   /**
    * Metadados do recorte. `EMPTY_META` em vez de `null` quando o recorte não
@@ -72,31 +82,51 @@ export function useDateFilter(rows, meta) {
 
   const setFrom = useCallback((from) => setRange((c) => ({ ...c, from: from || null })), [])
   const setTo = useCallback((to) => setRange((c) => ({ ...c, to: to || null })), [])
-  const reset = useCallback(() => setRange({ from: null, to: null }), [])
+  const resetRange = useCallback(() => setRange({ from: null, to: null }), [])
 
   const selectLastDays = useCallback(
     (n) => setRange(lastNDays(bounds.periodEnd, n)),
     [bounds.periodEnd],
   )
 
-  /** Qual atalho corresponde ao recorte atual, para marcar o botão. Null se nenhum. */
+  const selectCause = useCallback((next) => setCause(next || null), [])
+
+  /**
+   * Qual atalho corresponde ao recorte atual, para acender o botão.
+   *
+   * Deliberadamente NÃO exige que o recorte esteja estreitando alguma coisa.
+   * Num export de exatamente 7 dias — o formato semanal, ou seja, o caso comum —
+   * "últimos 7 dias" é o período inteiro: exigir `dateActive` deixava o botão
+   * apagado depois do clique e o app parecia não ter reagido. Aceso, ele diz que
+   * o clique valeu e que aquilo já é o que está na tela. Nesse caso "Tudo"
+   * acende junto, e está correto: os dois nomeiam o mesmo intervalo.
+   */
   const activeQuickRange = useMemo(() => {
-    if (!active || empty) return null
+    if (empty || !bounds.periodEnd) return null
     return (
       QUICK_RANGES.find((n) => {
         const q = clampRange(lastNDays(bounds.periodEnd, n), bounds)
         return q.from === effective.from && q.to === effective.to
       }) || null
     )
-  }, [active, empty, bounds, effective])
+  }, [empty, bounds, effective])
+
+  /** Dias que o período carregado cobre — atalho maior que isso não estreita nada. */
+  const loadedDays = rangeLengthDays(bounds.periodStart, bounds.periodEnd)
 
   return {
     /** intervalo resolvido — é o que a UI mostra nos campos */
     range: effective,
     bounds,
-    /** o recorte esconde alguma coisa? */
+    cause,
+    causes,
+    /** quantos dias o arquivo carregado cobre */
+    loadedDays,
+    /** algum recorte esconde alguma coisa? */
     active,
-    /** o recorte não intersecta o período carregado? */
+    /** só o recorte de data, para o estado do botão "Tudo" */
+    dateActive,
+    /** o intervalo não intersecta o período carregado? */
     empty,
     activeQuickRange,
     rows: filteredRows,
@@ -104,6 +134,7 @@ export function useDateFilter(rows, meta) {
     setFrom,
     setTo,
     selectLastDays,
-    reset,
+    selectCause,
+    resetRange,
   }
 }

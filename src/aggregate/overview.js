@@ -122,11 +122,18 @@ export function fleetByHour(rows) {
  * afirmação útil ("verificamos e não é isso"), enquanto a ausência da barra
  * deixa o leitor sem saber se foi zero ou se a causa nem é rastreada.
  *
+ * `only` desliga exatamente isso. Com uma causa isolada no filtro, as demais
+ * viriam zeradas — e aí a barra vazia passaria a MENTIR: ela afirma "verificada
+ * e não ocorreu", quando o que houve foi o filtro escondê-la. Isolar "câmera
+ * desalinhada" num export com 95 sensores cobertos desenhava "sensor coberto:
+ * 0" ao lado. Com `only`, o gráfico mostra só a causa pedida.
+ *
  * @param {object[]} rows
+ * @param {string|null} [only] causa isolada pelo filtro da tela
  * @returns {{cause: string, label: string, count: number, share: number}[]}
  */
-export function fleetByCause(rows) {
-  const counts = new Map(KNOWN_CAUSES.map((c) => [c, 0]))
+export function fleetByCause(rows, only = null) {
+  const counts = new Map((only ? [only] : KNOWN_CAUSES).map((c) => [c, 0]))
   let total = 0
   for (const r of rows || []) {
     if (!r.isFov) continue

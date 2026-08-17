@@ -221,8 +221,8 @@ function HourBlock({ rows }) {
   )
 }
 
-function CauseBlock({ rows }) {
-  const causes = useMemo(() => fleetByCause(rows), [rows])
+function CauseBlock({ rows, cause }) {
+  const causes = useMemo(() => fleetByCause(rows, cause), [rows, cause])
   const id = 'ov-cause'
   const items = causes.map((c) => ({ label: c.label, value: c.count, share: c.share }))
   const hasAny = causes.some((c) => c.count > 0)
@@ -240,12 +240,15 @@ function CauseBlock({ rows }) {
   const top = causes[0]
   return (
     <Block
-      title="Causa raiz"
+      title={cause ? `Causa raiz — só ${top.label}` : 'Causa raiz'}
       reading={
         !hasAny
           ? 'Sem exceção de FOV classificada no período.'
-          : `${top.label} responde por ${(top.share * 100).toFixed(0)}% das exceções. ` +
-            `As causas conhecidas aparecem mesmo com zero — a barra vazia é a afirmação de que aquela causa foi verificada e não ocorreu.`
+          : cause
+            ? `${fmtInt(top.count)} exceções de ${top.label} no período exibido. ` +
+              `As demais causas estão ocultas pelo filtro — não são zero no dado.`
+            : `${top.label} responde por ${(top.share * 100).toFixed(0)}% das exceções. ` +
+              `As causas conhecidas aparecem mesmo com zero — a barra vazia é a afirmação de que aquela causa foi verificada e não ocorreu.`
       }
     >
       {hasAny ? (
@@ -271,7 +274,7 @@ function CauseBlock({ rows }) {
  * Complementa o painel de observação, que é por equipamento e atravessa
  * uploads. Aqui nada é persistido: é a leitura do período que está na tela.
  */
-export function OverviewPanel({ rows, observed, onObserve, defaultDate, emptyReason }) {
+export function OverviewPanel({ rows, cause, observed, onObserve, defaultDate, emptyReason }) {
   if (!rows.length) {
     return <div className="empty">{emptyReason}</div>
   }
@@ -291,7 +294,7 @@ export function OverviewPanel({ rows, observed, onObserve, defaultDate, emptyRea
       />
       <div className="ov-stack">
         <HourBlock rows={rows} />
-        <CauseBlock rows={rows} />
+        <CauseBlock rows={rows} cause={cause} />
       </div>
     </div>
   )

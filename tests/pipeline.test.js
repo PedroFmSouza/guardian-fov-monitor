@@ -29,6 +29,11 @@ import {
   sortObservation,
   chartWindow,
   daysOutsideWindow,
+  causelessDayRuns,
+  causelessDayCount,
+  hasCauseBreakdown,
+  dayCountFor,
+  dayShiftsFor,
   dayCount,
   dayShifts,
   missingDayRuns,
@@ -57,6 +62,7 @@ import {
   lastNDays,
   rangeLengthDays,
 } from '../src/data/dateRange.js'
+import { availableCauses, filterRowsByCause } from '../src/data/causeFilter.js'
 import {
   buildVehicleDetail,
   WORST_DAY_PROFILES,
@@ -547,7 +553,11 @@ test('série diária é idempotente: mesmo arquivo duas vezes não duplica', () 
     row({ detection_time: serial('2026-07-07T09:00:00') }),
   ])
   const { series } = aggregateDailyByVehicle(rows)
-  assert.deepEqual(series['707']['2026-07-06'], { s1: 1, s2: 1 }, 'o dia é partido por turno')
+  assert.deepEqual(
+    series['707']['2026-07-06'],
+    { s1: 1, s2: 1, c: { 'tracking issue': { s1: 1, s2: 1 } } },
+    'o dia é partido por turno e por causa',
+  )
   assert.equal(dayCount(series['707']['2026-07-06']), 2)
 
   const once = mergeDaily({}, series)
@@ -1051,4 +1061,239 @@ test('equipamento sem nenhum dia no período exibido devolve janela vazia', () =
   const janela = chartWindow(byDay, null, { from: '2026-08-10', to: '2026-08-16' })
   assert.deepEqual(janela, [], 'não desenha em vez de inventar dias')
   assert.equal(daysOutsideWindow(byDay, janela), 2, 'o card pode dizer quantos dias existem fora')
+})
+
+/* ------------------------------------------------ recorte por causa raiz */
+
+test('isolar uma causa mantém só as exceções de FOV daquela causa', () => {
+  const { rows } = normalizeRows([
+    row({ event_id: 'A', classification: 'FOV exception - camera misaligned' }),
+    row({ event_id: 'B', classification: 'Exceção FOV - câmera desalinhada', event_type: 'Exceção FOV' }),
+    row({ event_id: 'C', classification: 'FOV exception - tracking issue' }),
+    // não é FOV: não tem causa de FOV nenhuma e some ao isolar qualquer uma
+    row({ event_id: 'D', event_type: 'fadiga', classification: 'fadiga - sonolência' }),
+  ])
+
+  const desalinhada = filterRowsByCause(rows, 'camera misaligned')
+  assert.equal(desalinhada.length, 2, 'as duas grafias colapsam na mesma causa')
+  assert.deepEqual(
+    desalinhada.map((r) => r.eventId).sort(),
+    ['A', 'B'],
+  )
+  assert.ok(
+    desalinhada.every((r) => r.isFov),
+    'linha que não é FOV nunca entra no recorte por causa',
+  )
+
+  assert.equal(filterRowsByCause(rows, null), rows, 'sem causa, devolve por identidade')
+})
+
+test('o seletor só oferece causas que existem, da mais frequente para a menos', () => {
+  const { rows } = normalizeRows([
+    row({ event_id: 'A', classification: 'FOV exception - tracking issue' }),
+    row({ event_id: 'B', classification: 'FOV exception - tracking issue' }),
+    row({ event_id: 'C', classification: 'FOV exception - camera misaligned' }),
+    row({ event_id: 'D', event_type: 'fadiga', classification: 'fadiga' }),
+  ])
+
+  const causas = availableCauses(rows)
+  assert.deepEqual(
+    causas.map((c) => c.cause),
+    ['tracking issue', 'camera misaligned'],
+    'ordenado por contagem; "sensor covered" não aparece porque não ocorreu',
+  )
+  assert.equal(causas[0].count, 2)
+  assert.deepEqual(availableCauses([]), [])
+})
+
+test('recorte por data e por causa compõem sem se atrapalhar', () => {
+  const { rows } = normalizeRows([
+    row({
+      event_id: 'A',
+      detection_time: serial('2026-07-06T09:00:00'),
+      classification: 'FOV exception - camera misaligned',
+    }),
+    row({
+      event_id: 'B',
+      detection_time: serial('2026-07-20T09:00:00'),
+      classification: 'FOV exception - camera misaligned',
+    }),
+    row({
+      event_id: 'C',
+      detection_time: serial('2026-07-20T09:00:00'),
+      classification: 'FOV exception - tracking issue',
+    }),
+  ])
+
+  const janela = filterRowsByRange(rows, { from: '2026-07-20', to: '2026-07-20' })
+  assert.equal(janela.length, 2)
+  const ambos = filterRowsByCause(janela, 'camera misaligned')
+  assert.deepEqual(
+    ambos.map((r) => r.eventId),
+    ['B'],
+  )
+})
+
+test('com uma causa isolada, o gráfico de causa raiz não desenha as outras zeradas', () => {
+  const { rows } = normalizeRows([
+    row({ event_id: 'A', classification: 'FOV exception - camera misaligned' }),
+    row({ event_id: 'B', classification: 'FOV exception - camera misaligned' }),
+    row({ event_id: 'C', classification: 'FOV exception - sensor covered' }),
+  ])
+
+  // sem recorte: as causas conhecidas aparecem mesmo zeradas, de propósito
+  const todas = fleetByCause(rows)
+  assert.ok(
+    todas.some((c) => c.cause === 'tracking issue' && c.count === 0),
+    'a barra vazia afirma que a causa foi verificada e não ocorreu',
+  )
+
+  // com recorte, essa mesma barra vazia MENTIRIA: sensor coberto ocorreu 3x no
+  // dado, e só sumiu por causa do filtro
+  const isolado = fleetByCause(filterRowsByCause(rows, 'camera misaligned'), 'camera misaligned')
+  assert.deepEqual(
+    isolado.map((c) => c.cause),
+    ['camera misaligned'],
+  )
+  assert.equal(isolado[0].count, 2)
+  assert.equal(isolado[0].share, 1)
+})
+
+test('num export de 7 dias, o atalho de 7 dias É o período inteiro', () => {
+  // formato semanal do Guardian: o caso comum, não uma borda exótica
+  const semana = { periodStart: '2026-07-20', periodEnd: '2026-07-26' }
+  assert.equal(rangeLengthDays(semana.periodStart, semana.periodEnd), 7)
+
+  const atalho = clampRange(lastNDays(semana.periodEnd, 7), semana)
+  assert.deepEqual(atalho, { from: '2026-07-20', to: '2026-07-26' })
+  assert.equal(
+    isFullRange(lastNDays(semana.periodEnd, 7), semana),
+    true,
+    'clicar no atalho não estreita nada — o botão precisa dizer isso, não ficar mudo',
+  )
+
+  // e os atalhos maiores colapsam no mesmo intervalo
+  for (const n of [14, 30]) {
+    assert.deepEqual(clampRange(lastNDays(semana.periodEnd, n), semana), atalho)
+  }
+})
+
+/* -------------------------- série diária com divisão por causa raiz */
+
+test('a série grava a causa por dia e por turno, de forma esparsa', () => {
+  const { rows } = normalizeRows([
+    row({
+      event_id: 'A',
+      detection_time: serial('2026-07-06T09:00:00'), // 1º turno
+      classification: 'FOV exception - camera misaligned',
+    }),
+    row({
+      event_id: 'B',
+      detection_time: serial('2026-07-06T20:00:00'), // 2º turno
+      classification: 'FOV exception - camera misaligned',
+    }),
+    row({
+      event_id: 'C',
+      detection_time: serial('2026-07-06T09:30:00'),
+      classification: 'FOV exception - sensor covered',
+    }),
+  ])
+  const dia = aggregateDailyByVehicle(rows).series['707']['2026-07-06']
+
+  assert.deepEqual(dia.c, {
+    'camera misaligned': { s1: 1, s2: 1 },
+    'sensor covered': { s1: 1, s2: 0 },
+  })
+  assert.equal(dayCount(dia), 3, 'o total continua sendo a soma de todas as causas')
+  assert.ok(!('tracking issue' in dia.c), 'causa sem evento no dia não é gravada')
+})
+
+test('dia sem a quebra por causa responde "não sei", nunca zero', () => {
+  const antigo = { s1: 3, s2: 4 } // gravado antes desta versão
+  const novo = { s1: 3, s2: 4, c: { 'tracking issue': { s1: 3, s2: 4 } } }
+  const vazio = { s1: 0, s2: 0, c: {} } // apurado por causa, nenhuma ocorreu
+
+  assert.equal(hasCauseBreakdown(antigo), false)
+  assert.equal(hasCauseBreakdown(vazio), true, 'mapa vazio ainda é uma resposta')
+
+  assert.equal(dayCountFor(antigo, 'camera misaligned'), null, '"não sei"')
+  assert.equal(dayCountFor(vazio, 'camera misaligned'), 0, '"verificado, não ocorreu"')
+  assert.equal(dayCountFor(novo, 'tracking issue'), 7)
+  assert.equal(dayCountFor(novo, 'camera misaligned'), 0)
+  assert.equal(dayCountFor(antigo, null), 7, 'sem causa pedida, o total antigo vale normalmente')
+
+  assert.deepEqual(dayShiftsFor(antigo, 'camera misaligned'), [null, null])
+  assert.deepEqual(dayShiftsFor(novo, 'tracking issue'), [3, 4])
+  assert.deepEqual(dayShiftsFor(novo, 'camera misaligned'), [0, 0])
+})
+
+test('dias sem causa não afundam o baseline nem inventam reincidência', () => {
+  const comCausa = (n) => ({ s1: n, s2: 0, c: { 'camera misaligned': { s1: n, s2: 0 } } })
+
+  // baseline alto de câmera desalinhada, depois um dia pós igualmente alto:
+  // não é reincidência, porque não caiu
+  const serie = {
+    '2026-07-16': comCausa(10),
+    '2026-07-17': comCausa(10),
+    '2026-07-18': comCausa(10),
+    '2026-07-20': comCausa(10),
+  }
+  const bom = evaluateObservation(serie, '2026-07-19', 'camera misaligned')
+  assert.equal(bom.preMean, 10)
+  assert.equal(bom.unknownDays, 0)
+
+  // agora os mesmos dias de baseline gravados SEM causa: se virassem zero, a
+  // média cairia para 0, o limiar iria ao piso e o dia pós de 10 seria lido
+  // como reincidência inventada
+  const serieAntiga = {
+    '2026-07-16': { s1: 10, s2: 0 },
+    '2026-07-17': { s1: 10, s2: 0 },
+    '2026-07-18': { s1: 10, s2: 0 },
+    '2026-07-20': comCausa(10),
+  }
+  const res = evaluateObservation(serieAntiga, '2026-07-19', 'camera misaligned')
+  assert.equal(res.unknownDays, 3, 'os três dias antigos são reportados, não contados')
+  assert.equal(res.preDays, 0, 'e ficam fora do baseline')
+  assert.equal(res.preMean, 0)
+
+  // sem causa pedida, esses mesmos dias continuam valendo integralmente
+  const todas = evaluateObservation(serieAntiga, '2026-07-19')
+  assert.equal(todas.preDays, 3)
+  assert.equal(todas.preMean, 10)
+  assert.equal(todas.unknownDays, 0)
+})
+
+test('equipamento sem nenhum dia apurado para a causa não recebe veredito', () => {
+  const serie = { '2026-07-18': { s1: 5, s2: 0 }, '2026-07-21': { s1: 5, s2: 0 } }
+  const res = evaluateObservation(serie, '2026-07-19', 'camera misaligned')
+  assert.equal(res.status, OBS_STATUS.NO_DATA)
+  assert.equal(res.unknownDays, 2)
+})
+
+test('os dias sem causa viram faixa hachurada na janela do gráfico', () => {
+  const byDay = {
+    '2026-07-18': { s1: 1, s2: 0 }, // antigo
+    '2026-07-19': { s1: 1, s2: 0, c: { 'camera misaligned': { s1: 1, s2: 0 } } },
+    '2026-07-20': { s1: 2, s2: 0 }, // antigo
+  }
+  const dias = ['2026-07-18', '2026-07-19', '2026-07-20']
+  assert.deepEqual(causelessDayRuns(dias, byDay), [
+    [0, 0],
+    [2, 2],
+  ])
+  assert.equal(causelessDayCount(dias, byDay), 2)
+})
+
+test('recarregar um export antigo preenche a causa dos dias que não sabiam', () => {
+  const guardado = { 707: { '2026-07-06': { s1: 1, s2: 1 } } }
+  const { rows } = normalizeRows([
+    row({ event_id: 'A', detection_time: serial('2026-07-06T09:00:00') }),
+    row({ event_id: 'B', detection_time: serial('2026-07-06T20:00:00') }),
+  ])
+  const { series } = aggregateDailyByVehicle(rows)
+  const merged = mergeDaily(guardado, series)
+
+  assert.equal(hasCauseBreakdown(merged[707]['2026-07-06']), true)
+  assert.equal(dayCountFor(merged[707]['2026-07-06'], 'tracking issue'), 2)
+  assert.equal(dayCount(merged[707]['2026-07-06']), 2, 'e o total não mudou')
 })

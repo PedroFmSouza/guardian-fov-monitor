@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react'
 
+import { causeLabel } from '../aggregate/overview.js'
 import { rangeLengthDays } from '../data/dateRange.js'
 import { fmtInt } from '../ui/kpis.js'
 import { useNativeListener } from './hooks.js'
-import { QUICK_RANGES } from './useDateFilter.js'
+import { QUICK_RANGES } from './useViewFilter.js'
 
 /**
  * Um campo de data do recorte.
@@ -41,20 +42,21 @@ function DateField({ id, label, value, min, max, onCommit }) {
 }
 
 /**
- * Recorte por data da leitura na tela.
+ * Recorte da leitura na tela: período e causa raiz.
  *
- * Afeta a faixa de metadados e a visão geral da frota. NÃO afeta o painel de
- * observação: o veredito de reincidência de cada card vem da série diária
- * acumulada entre uploads, e recortá-la aqui produziria um card que diz
- * "reincidente" acima de um gráfico sem os dias que geraram o veredito.
+ * Afeta a faixa de metadados e a visão geral da frota. No painel de observação
+ * alcança só o DESENHO da série de cada card (ver `chartWindow`); o veredito de
+ * reincidência continua contado sobre a série acumulada inteira, e o card diz
+ * quantos dias ficaram fora.
  */
-export function DateFilter({ filter, fullMeta }) {
-  const { range, bounds, active, empty, activeQuickRange, meta } = filter
+export function ViewFilter({ filter, fullMeta }) {
+  const { range, bounds, active, dateActive, empty, activeQuickRange, causes, cause, meta } = filter
+  const { loadedDays } = filter
   const days = rangeLengthDays(range.from, range.to)
 
   return (
-    <section className="panel datefilter" aria-label="Período exibido">
-      <div className="datefilter__row">
+    <section className="panel viewfilter" aria-label="Recorte do que é exibido">
+      <div className="viewfilter__row">
         <DateField
           id="filter-from"
           label="De"
@@ -72,14 +74,21 @@ export function DateFilter({ filter, fullMeta }) {
           onCommit={filter.setTo}
         />
 
-        <div className="datefilter__quick" role="group" aria-label="Atalhos de período">
+        <div className="viewfilter__quick" role="group" aria-label="Atalhos de período">
           {QUICK_RANGES.map((n) => (
             <button
               key={n}
               type="button"
-              className={`btn btn--sm${activeQuickRange === n ? ' btn--on' : ''}`}
+              className={`btn btn--sm${activeQuickRange === n ? ' btn--on' : ''}${
+                loadedDays && n >= loadedDays ? ' btn--inert' : ''
+              }`}
               id={`filter-last-${n}`}
               aria-pressed={activeQuickRange === n}
+              title={
+                loadedDays && n >= loadedDays
+                  ? `O período carregado tem ${loadedDays} dia(s): este atalho cobre o arquivo inteiro e não estreita nada.`
+                  : `Últimos ${n} dias a partir de ${bounds.periodEnd}`
+              }
               onClick={() => filter.selectLastDays(n)}
             >
               {n} dias
@@ -87,16 +96,33 @@ export function DateFilter({ filter, fullMeta }) {
           ))}
           <button
             type="button"
-            className={`btn btn--sm${active ? '' : ' btn--on'}`}
+            className={`btn btn--sm${dateActive ? '' : ' btn--on'}`}
             id="filter-all"
-            aria-pressed={!active}
-            onClick={filter.reset}
+            aria-pressed={!dateActive}
+            onClick={filter.resetRange}
           >
             Tudo
           </button>
         </div>
 
-        <p className="datefilter__note" id="filter-note" role="status" aria-live="polite">
+        <label className="field">
+          <span className="field__k">Causa raiz</span>
+          <select
+            className={`field__input field__input--sm${cause ? ' field__input--on' : ''}`}
+            id="filter-cause"
+            value={cause || ''}
+            onChange={(e) => filter.selectCause(e.target.value)}
+          >
+            <option value="">Todas as causas</option>
+            {causes.map((c) => (
+              <option value={c.cause} key={c.cause}>
+                {causeLabel(c.cause)} ({fmtInt(c.count)})
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <p className="viewfilter__note" id="filter-note" role="status" aria-live="polite">
           {empty ? (
             <>
               Nenhum dia selecionado — a data inicial é posterior à final, ou o intervalo está fora
@@ -112,13 +138,25 @@ export function DateFilter({ filter, fullMeta }) {
               <span className="mono">
                 {range.from} → {range.to}
               </span>{' '}
-              ({days}d) · <span className="mono">{fmtInt(meta ? meta.rowCount : 0)}</span> de{' '}
+              ({days}d)
+              {cause ? (
+                <>
+                  , só <strong>{causeLabel(cause)}</strong>
+                </>
+              ) : null}{' '}
+              · <span className="mono">{fmtInt(meta ? meta.rowCount : 0)}</span> de{' '}
               <span className="mono">{fmtInt(fullMeta.rowCount)}</span> registros
+              {cause ? ' (isolar uma causa descarta os eventos que não são de FOV)' : ''}
             </>
           ) : (
             <>
-              Exibindo o período inteiro carregado. Os atalhos contam a partir do dia mais recente
-              com dado (<span className="mono">{bounds.periodEnd}</span>), não de hoje.
+              Exibindo o período inteiro carregado — <span className="mono">{loadedDays}</span>{' '}
+              dia(s), todas as causas. Os atalhos contam a partir do dia mais recente com dado (
+              <span className="mono">{bounds.periodEnd}</span>), não de hoje
+              {loadedDays && loadedDays <= QUICK_RANGES[0]
+                ? `, então nenhum deles estreita um arquivo de ${loadedDays} dia(s)`
+                : ''}
+              .
             </>
           )}
         </p>

@@ -8,12 +8,14 @@ import {
   OBSERVATION_DAYS,
   chartWindow,
   daysOutsideWindow,
-  dayCount,
-  dayShifts,
+  dayCountFor,
+  dayShiftsFor,
   missingDayRuns,
   missingDayCount,
   unsplitDayRuns,
   unsplitDayCount,
+  causelessDayRuns,
+  causelessDayCount,
 } from '../../aggregate/byDailyVehicle.js'
 import { useChart, useNativeListener } from '../hooks.js'
 import { Detail } from './Detail.jsx'
@@ -54,16 +56,17 @@ function Verdict({ res }) {
 }
 
 /** Série diária por turno, com as faixas de vão desenhadas por cima. */
-function DailySeries({ vehicle, byDay, days, res, maintenanceDate, isOpen }) {
+function DailySeries({ vehicle, byDay, days, res, maintenanceDate, cause, isOpen }) {
   const id = canvasIdFor(vehicle)
 
   const values = useMemo(
     () => ({
-      // dias fora da série viram null (buraco na linha), não zero
-      shift1: days.map((d) => (d in byDay ? dayShifts(byDay[d])[0] : null)),
-      shift2: days.map((d) => (d in byDay ? dayShifts(byDay[d])[1] : null)),
+      // dias fora da série viram null (buraco na linha), não zero — e o mesmo
+      // vale para dia que não sabe responder pela causa isolada
+      shift1: days.map((d) => (d in byDay ? dayShiftsFor(byDay[d], cause)[0] : null)),
+      shift2: days.map((d) => (d in byDay ? dayShiftsFor(byDay[d], cause)[1] : null)),
     }),
-    [days, byDay],
+    [days, byDay, cause],
   )
 
   useChart(
@@ -80,12 +83,16 @@ function DailySeries({ vehicle, byDay, days, res, maintenanceDate, isOpen }) {
         recurrenceDays: res.recurrenceDays,
         // os mesmos buracos, marcados na área do gráfico — separados por motivo
         gaps: missingDayRuns(days, byDay),
-        unsplit: unsplitDayRuns(days, byDay),
+        // com causa isolada, dia sem a quebra por causa é hachurado junto: a
+        // linha some ali, e sem faixa o vão pareceria "zero exceções"
+        unsplit: cause
+          ? [...unsplitDayRuns(days, byDay), ...causelessDayRuns(days, byDay)]
+          : unsplitDayRuns(days, byDay),
         // Zoom só no card aberto: fechado, a roda do mouse precisa continuar
         // rolando a página em vez de ampliar uma miniatura de 132px.
         zoom: isOpen,
       }),
-    `${days.join()}|${values.shift1.join()}|${values.shift2.join()}|${res.status}|${maintenanceDate || ''}|${res.threshold}|${isOpen}`,
+    `${days.join()}|${values.shift1.join()}|${values.shift2.join()}|${res.status}|${maintenanceDate || ''}|${res.threshold}|${cause || ''}|${isOpen}`,
   )
 
   return (
@@ -99,12 +106,17 @@ function DailySeries({ vehicle, byDay, days, res, maintenanceDate, isOpen }) {
   )
 }
 
-export function Card({ entry, res, byDay, rows, range, isOpen, onToggle, onRemove, onPatch }) {
+export function Card({ entry, res, byDay, rows, range, cause, isOpen, onToggle, onRemove, onPatch }) {
   const { vehicle, maintenanceDate, note } = entry
   const dateRef = useRef(null)
   const noteRef = useRef(null)
 
-  const total = useMemo(() => Object.values(byDay).reduce((a, v) => a + dayCount(v), 0), [byDay])
+  // total da causa exibida; dias que não sabem responder não somam nada
+  const total = useMemo(
+    () =>
+      Object.values(byDay).reduce((a, v) => a + (dayCountFor(v, cause) || 0), 0),
+    [byDay, cause],
+  )
   // o gráfico desenha só o período exibido; o veredito segue vindo da série toda
   const days = useMemo(
     () => chartWindow(byDay, maintenanceDate, range),
@@ -113,6 +125,9 @@ export function Card({ entry, res, byDay, rows, range, isOpen, onToggle, onRemov
   const gapDays = missingDayCount(days, byDay)
   const unsplitDays = unsplitDayCount(days, byDay)
   const outsideDays = daysOutsideWindow(byDay, days)
+  // só conta quando há causa isolada: sem filtro, a falta da quebra por causa
+  // não muda absolutamente nada do que o card mostra
+  const causelessDays = cause ? causelessDayCount(days, byDay) : 0
   const hasSeries = Object.keys(byDay).length > 0
 
   // O detalhe varre as linhas do export inteiro; só vale a pena para o card
@@ -241,6 +256,17 @@ export function Card({ entry, res, byDay, rows, range, isOpen, onToggle, onRemov
             fora do período <b>{outsideDays}</b> dia(s)
           </span>
         ) : null}
+        {/* Dia gravado antes da quebra por causa: o total dele é real, mas não
+            há como atribuí-lo a uma causa. Com filtro de causa ativo ele fica
+            fora de tudo — dizer isso é o que separa "não ocorreu" de "não sei". */}
+        {causelessDays ? (
+          <span
+            className="wl-card__gap"
+            title="Dias gravados antes de a série passar a guardar a causa raiz. Enquanto há uma causa isolada eles não entram nas médias nem no veredito, e aparecem hachurados no gráfico. Recarregue os exports desses dias para preencher."
+          >
+            sem causa <b>{causelessDays}</b> dia(s)
+          </span>
+        ) : null}
       </div>
 
       {hasSeries && days.length ? (
@@ -251,6 +277,7 @@ export function Card({ entry, res, byDay, rows, range, isOpen, onToggle, onRemov
             days={days}
             res={res}
             maintenanceDate={maintenanceDate}
+            cause={cause}
             isOpen={isOpen}
           />
           {isOpen ? (
