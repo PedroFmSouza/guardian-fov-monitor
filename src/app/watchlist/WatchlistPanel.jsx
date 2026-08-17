@@ -153,7 +153,7 @@ function Legend() {
  * manualmente, acompanhados dia a dia para responder uma pergunta só — o
  * problema voltou?
  */
-export function WatchlistPanel({ watchlist, rows, meta }) {
+export function WatchlistPanel({ watchlist, rows, meta, range }) {
   const { entries, defaultDate, daily, add, remove, patch, setDefaultDate } = watchlist
   /** Cards com o detalhe aberto. Estado só de tela: não persiste. */
   const [expanded, setExpanded] = useState(() => new Set())
@@ -193,6 +193,7 @@ export function WatchlistPanel({ watchlist, rows, meta }) {
               res={res}
               byDay={daily[entry.vehicle] || EMPTY}
               rows={rows}
+              range={range}
               isOpen={expanded.has(entry.vehicle)}
               onToggle={toggle}
               onRemove={remove}

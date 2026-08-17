@@ -28,6 +28,7 @@ import {
   summarizeObservation,
   sortObservation,
   chartWindow,
+  daysOutsideWindow,
   dayCount,
   dayShifts,
   missingDayRuns,
@@ -43,9 +44,19 @@ import {
   mergeDaily,
   normalizeEntry,
   addEntry,
+  addEntries,
   removeEntry,
   patchEntry,
 } from '../src/persistence/watchlist.js'
+import {
+  addDays,
+  clampRange,
+  filterRowsByRange,
+  isEmptyRange,
+  isFullRange,
+  lastNDays,
+  rangeLengthDays,
+} from '../src/data/dateRange.js'
 import {
   buildVehicleDetail,
   WORST_DAY_PROFILES,
@@ -904,4 +915,140 @@ test('cada equipamento mantém sua própria data de manutenção', () => {
   assert.equal(entries.find((e) => e.vehicle === '707').maintenanceDate, '2026-07-10')
   assert.equal(entries.find((e) => e.vehicle === '224').maintenanceDate, '2026-07-19')
   assert.equal(removeEntry(entries, '707').length, 1)
+})
+/* ------------------------------------------------- recorte por data da tela */
+
+const BOUNDS = { periodStart: '2026-07-06', periodEnd: '2026-07-20' }
+const dayRows = (...days) => days.map((dayKey) => ({ dayKey }))
+
+test('intervalo vazio resolve para o período inteiro carregado', () => {
+  assert.deepEqual(clampRange({ from: null, to: null }, BOUNDS), {
+    from: '2026-07-06',
+    to: '2026-07-20',
+  })
+  assert.equal(isFullRange({ from: null, to: null }, BOUNDS), true)
+  assert.equal(isFullRange({ from: '2026-07-10', to: null }, BOUNDS), false)
+})
+
+test('cada ponta é grampeada ao período; sem dado carregado nada é grampeado', () => {
+  // pedido mais largo que o arquivo encolhe para as bordas reais
+  assert.deepEqual(clampRange({ from: '2026-01-01', to: '2026-12-31' }, BOUNDS), {
+    from: '2026-07-06',
+    to: '2026-07-20',
+  })
+  assert.deepEqual(clampRange({ from: '2026-07-10', to: '2026-07-12' }, BOUNDS), {
+    from: '2026-07-10',
+    to: '2026-07-12',
+  })
+  assert.deepEqual(
+    clampRange({ from: '2026-07-10', to: null }, { periodStart: null, periodEnd: null }),
+    { from: '2026-07-10', to: null },
+  )
+})
+
+test('intervalo invertido não seleciona nada — nunca é "consertado" por inversão', () => {
+  // Com as duas pontas preenchidas, "digitei ao contrário" e "pedi um intervalo
+  // que não existe no arquivo" são a MESMA entrada. Inverter para salvar o
+  // primeiro caso faria o segundo exibir silenciosamente um dia qualquer.
+  const invertido = clampRange({ from: '2026-07-15', to: '2026-07-08' }, BOUNDS)
+  assert.equal(isEmptyRange(invertido), true)
+  assert.deepEqual(filterRowsByRange(dayRows('2026-07-10'), invertido), [])
+
+  // pedir 2030 num arquivo que termina em julho/2026: o grampeamento leva `to`
+  // para a borda e o resultado tem de continuar vazio, não virar o último dia
+  const foraDoPeriodo = clampRange({ from: '2030-01-01', to: '2026-07-19' }, BOUNDS)
+  assert.deepEqual(foraDoPeriodo, { from: '2030-01-01', to: '2026-07-19' })
+  assert.equal(isEmptyRange(foraDoPeriodo), true)
+  assert.deepEqual(filterRowsByRange(dayRows('2026-07-19'), foraDoPeriodo), [])
+
+  // e o caso com uma ponta só, que vira invertido depois do grampeamento
+  const semInterseccao = clampRange({ from: '2026-09-01', to: null }, BOUNDS)
+  assert.equal(isEmptyRange(semInterseccao), true)
+  assert.deepEqual(filterRowsByRange(dayRows('2026-07-10'), semInterseccao), [])
+})
+
+test('o recorte filtra pelo dia e devolve o MESMO array quando não recorta nada', () => {
+  const rows = dayRows('2026-07-06', '2026-07-10', '2026-07-20')
+
+  assert.equal(filterRowsByRange(rows, { from: null, to: null }), rows, 'identidade preservada')
+
+  assert.deepEqual(
+    filterRowsByRange(rows, { from: '2026-07-10', to: '2026-07-20' }).map((r) => r.dayKey),
+    ['2026-07-10', '2026-07-20'],
+    'os limites são inclusivos nas duas pontas',
+  )
+  assert.deepEqual(
+    filterRowsByRange(rows, { from: null, to: '2026-07-06' }).map((r) => r.dayKey),
+    ['2026-07-06'],
+  )
+})
+
+test('atalho de N dias ancora no dia mais recente COM DADO, não em hoje', () => {
+  assert.deepEqual(lastNDays('2026-07-20', 7), { from: '2026-07-14', to: '2026-07-20' })
+  assert.equal(rangeLengthDays('2026-07-14', '2026-07-20'), 7, 'a janela é fechada dos dois lados')
+
+  // atravessa a virada de mês sem depender do fuso da máquina
+  assert.equal(addDays('2026-03-01', -1), '2026-02-28')
+  assert.equal(addDays('2026-12-31', 1), '2027-01-01')
+
+  // pedir mais dias do que o arquivo tem não inventa dias antes do início
+  assert.deepEqual(clampRange(lastNDays('2026-07-20', 90), BOUNDS), {
+    from: '2026-07-06',
+    to: '2026-07-20',
+  })
+})
+
+test('entrada em lote pula quem já está em observação e reporta quem entrou', () => {
+  const entries = addEntry([], '707', '2026-07-10')
+
+  const first = addEntries(entries, ['707', '224', '712'], '2026-07-18')
+  assert.deepEqual(first.added, ['224', '712'], '707 já estava na lista')
+  assert.equal(first.entries.length, 3)
+  assert.equal(
+    first.entries.find((e) => e.vehicle === '707').maintenanceDate,
+    '2026-07-10',
+    'a data de quem já estava não é reescrita',
+  )
+
+  // idempotente: reclicar não duplica nem altera nada
+  const second = addEntries(first.entries, ['707', '224', '712'], '2026-07-25')
+  assert.deepEqual(second.added, [])
+  assert.equal(second.entries, first.entries, 'sem entrada nova, devolve por identidade')
+})
+
+test('a janela do gráfico do card é recortada ao período exibido', () => {
+  // série acumulada de 3 semanas no localStorage; o export aberto cobre só a última
+  const byDay = {
+    '2026-06-29': 5,
+    '2026-07-06': 4,
+    '2026-07-20': 3,
+    '2026-08-10': 7,
+    '2026-08-16': 2,
+  }
+  const exibido = { from: '2026-08-10', to: '2026-08-16' }
+
+  const janela = chartWindow(byDay, null, exibido)
+  assert.equal(janela[0], '2026-08-10')
+  assert.equal(janela[janela.length - 1], '2026-08-16')
+  assert.equal(daysOutsideWindow(byDay, janela), 3, 'os 3 dias de junho/julho ficam de fora')
+
+  // sem recorte, continua desenhando a série inteira — comportamento antigo intacto
+  const cheia = chartWindow(byDay, null)
+  assert.equal(cheia[0], '2026-06-29')
+  assert.equal(daysOutsideWindow(byDay, cheia), 0)
+})
+
+test('o baseline pré-manutenção não escapa do período exibido', () => {
+  const byDay = { '2026-07-01': 9, '2026-08-11': 4, '2026-08-14': 6 }
+  // a manutenção é 12/08: o baseline puxaria a janela semanas para trás
+  const janela = chartWindow(byDay, '2026-08-12', { from: '2026-08-10', to: '2026-08-16' })
+  assert.equal(janela[0], '2026-08-11', 'a janela começa dentro do período exibido')
+  assert.equal(janela[janela.length - 1], '2026-08-14')
+})
+
+test('equipamento sem nenhum dia no período exibido devolve janela vazia', () => {
+  const byDay = { '2026-06-29': 5, '2026-07-06': 4 }
+  const janela = chartWindow(byDay, null, { from: '2026-08-10', to: '2026-08-16' })
+  assert.deepEqual(janela, [], 'não desenha em vez de inventar dias')
+  assert.equal(daysOutsideWindow(byDay, janela), 2, 'o card pode dizer quantos dias existem fora')
 })

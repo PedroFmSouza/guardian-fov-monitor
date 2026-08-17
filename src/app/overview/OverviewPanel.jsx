@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 
 import { aggregateByVehicle } from '../../aggregate/byVehicle.js'
 import { fleetByCause, fleetByHour, fleetDaily } from '../../aggregate/overview.js'
@@ -9,6 +9,9 @@ import { useChart } from '../hooks.js'
 
 /** Quantos equipamentos entram no ranking. */
 const RANK_SIZE = 12
+
+/** Quantos o botão de entrada em lote coloca em observação. */
+const TOP_OBSERVE = 5
 
 /**
  * Um bloco do painel: título, uma frase de leitura e o gráfico.
@@ -78,7 +81,56 @@ function TrendBlock({ rows }) {
   )
 }
 
-function RankBlock({ rows }) {
+/**
+ * Entrada em lote dos piores do ranking na lista de observação.
+ *
+ * A data de manutenção usada é a data sugerida do formulário de observação — o
+ * botão não tem como saber quando cada equipamento foi mexido. Isso é dito na
+ * legenda em vez de escondido: a data manda no baseline de reincidência, e cada
+ * card permite corrigi-la depois. Quem já está na lista é pulado, então clicar
+ * duas vezes não duplica nem reescreve a data de ninguém.
+ */
+function ObserveTop({ items, observed, onObserve, defaultDate }) {
+  const [result, setResult] = useState(null)
+
+  const candidates = items.slice(0, TOP_OBSERVE).map((i) => i.label)
+  const pending = candidates.filter((v) => !observed.has(v))
+
+  if (!candidates.length) return null
+
+  return (
+    <div className="ov-observe">
+      <button
+        type="button"
+        className="btn btn--primary btn--sm"
+        id="ov-observe-top"
+        disabled={!pending.length}
+        onClick={() => setResult(onObserve(pending))}
+      >
+        Colocar os {Math.min(TOP_OBSERVE, candidates.length)} piores em observação
+      </button>
+      <p className="ov-observe__note" role="status" aria-live="polite">
+        {!pending.length ? (
+          <>Os {candidates.length} piores já estão em observação.</>
+        ) : result ? (
+          <>
+            {result.length} equipamento(s) em observação:{' '}
+            <span className="mono">{result.join(' · ')}</span>. Ajuste a data da manutenção em cada
+            card — o baseline de reincidência é contado a partir dela.
+          </>
+        ) : (
+          <>
+            Entram <span className="mono">{pending.join(' · ')}</span> com a data{' '}
+            <span className="mono">{defaultDate}</span>, que é a data sugerida do formulário acima.
+            Corrija-a em cada card se a manutenção foi em outro dia.
+          </>
+        )}
+      </p>
+    </div>
+  )
+}
+
+function RankBlock({ rows, observed, onObserve, defaultDate }) {
   const items = useMemo(() => {
     const stats = aggregateByVehicle(rows).filter((v) => v.fov > 0)
     return stats.slice(0, RANK_SIZE).map((v) => ({
@@ -116,8 +168,8 @@ function RankBlock({ rows }) {
       title={`Equipamentos com mais exceções — top ${Math.min(RANK_SIZE, items.length)}`}
       reading={
         `${items[0].label} lidera com ${fmtInt(items[0].value)} exceções ` +
-        `(${items[0].perDay.toFixed(1)}/dia). Entrar em observação é decisão de quem opera — ` +
-        `o ranking não adiciona ninguém à lista.`
+        `(${items[0].perDay.toFixed(1)}/dia). Nenhum upload mexe na lista de observação — ` +
+        `o botão abaixo é a única forma de o ranking colocar alguém lá, e só quando clicado.`
       }
     >
       <div className="chartbox chartbox--rank">
@@ -129,6 +181,12 @@ function RankBlock({ rows }) {
             .join(', ')}.`}
         />
       </div>
+      <ObserveTop
+        items={items}
+        observed={observed}
+        onObserve={onObserve}
+        defaultDate={defaultDate}
+      />
     </Block>
   )
 }
@@ -213,14 +271,9 @@ function CauseBlock({ rows }) {
  * Complementa o painel de observação, que é por equipamento e atravessa
  * uploads. Aqui nada é persistido: é a leitura do período que está na tela.
  */
-export function OverviewPanel({ rows }) {
+export function OverviewPanel({ rows, observed, onObserve, defaultDate, emptyReason }) {
   if (!rows.length) {
-    return (
-      <div className="empty">
-        Carregue um export para ver a visão geral da frota — tendência, ranking, hora do dia e causa
-        raiz.
-      </div>
-    )
+    return <div className="empty">{emptyReason}</div>
   }
 
   // O ranking é alto (uma barra por equipamento) e os outros dois são baixos.
@@ -230,7 +283,12 @@ export function OverviewPanel({ rows }) {
   return (
     <div className="ov-grid">
       <TrendBlock rows={rows} />
-      <RankBlock rows={rows} />
+      <RankBlock
+        rows={rows}
+        observed={observed}
+        onObserve={onObserve}
+        defaultDate={defaultDate}
+      />
       <div className="ov-stack">
         <HourBlock rows={rows} />
         <CauseBlock rows={rows} />

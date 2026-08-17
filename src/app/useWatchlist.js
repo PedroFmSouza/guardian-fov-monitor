@@ -7,6 +7,7 @@ import {
   saveDaily,
   mergeDaily,
   addEntry,
+  addEntries,
   removeEntry,
   patchEntry,
 } from '../persistence/watchlist.js'
@@ -52,6 +53,28 @@ export function useWatchlist() {
     [update],
   )
 
+  /**
+   * Entrada em lote — o botão que coloca os piores do ranking em observação.
+   *
+   * Uma única transação: um `setList`, uma gravação no localStorage. Chamar
+   * `add` em laço funcionaria (o `update` é funcional), mas gravaria a lista
+   * inteira uma vez por equipamento.
+   *
+   * @returns {string[]} quem de fato entrou — quem já estava é ignorado
+   */
+  const addMany = useCallback(
+    (vehicles, maintenanceDate, note) => {
+      const { added } = addEntries(list.entries, vehicles, maintenanceDate, note)
+      update((current) => {
+        const next = addEntries(current.entries, vehicles, maintenanceDate, note)
+        if (next.entries === current.entries) return current
+        return { entries: next.entries, defaultDate: maintenanceDate || current.defaultDate }
+      })
+      return added
+    },
+    [list.entries, update],
+  )
+
   const remove = useCallback(
     (vehicle) => update((c) => ({ ...c, entries: removeEntry(c.entries, vehicle) })),
     [update],
@@ -89,6 +112,7 @@ export function useWatchlist() {
     defaultDate: list.defaultDate,
     daily,
     add,
+    addMany,
     remove,
     patch,
     setDefaultDate,

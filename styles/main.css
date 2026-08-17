@@ -385,6 +385,34 @@ body {
   white-space: nowrap;
 }
 
+/* ------------------------------------------------------- filtro de período */
+
+.datefilter {
+  padding: var(--space-4) var(--gut);
+}
+
+.datefilter__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+}
+
+.datefilter__quick {
+  display: flex;
+  gap: var(--space-2);
+  /* alinha com a base dos campos, que têm rótulo acima */
+  padding-bottom: 1px;
+}
+
+.datefilter__note {
+  margin: 0;
+  padding-bottom: var(--space-1);
+  flex: 1 1 260px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
 /* -------------------------------------------------------------- dropzone */
 
 .dropzone {
@@ -602,6 +630,30 @@ body {
   background: var(--color-critical);
   border-color: var(--color-critical);
   color: var(--color-on-critical);
+}
+
+/* botão de alternância no estado ligado — acompanha aria-pressed */
+.btn--on {
+  background: var(--color-primary-subtle);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* desabilitado não reage ao hover — cada variante volta à sua própria cor */
+.btn:disabled:hover {
+  background: var(--color-surface);
+  border-color: var(--color-border-strong);
+}
+
+.btn--primary:disabled:hover {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
 }
 
 /* --------------------------------------------------------------- gráficos */
@@ -1333,6 +1385,25 @@ body {
   line-height: 1.5;
   color: var(--color-text-muted);
   max-width: 62ch;
+}
+
+/* Entrada em lote dos piores do ranking na lista de observação. */
+.ov-observe {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: var(--hair);
+}
+
+.ov-observe__note {
+  margin: 0;
+  flex: 1 1 260px;
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--color-text-muted);
 }
 
 /* Altura por número de barras: container de altura fixa cortaria o eixo x e

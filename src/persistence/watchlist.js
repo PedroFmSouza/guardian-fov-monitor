@@ -100,6 +100,30 @@ export function addEntry(entries, vehicle, maintenanceDate = null, note = '') {
   return [...entries, { vehicle: v, maintenanceDate: maintenanceDate || null, note: note || '' }]
 }
 
+/**
+ * Adiciona vários equipamentos de uma vez, pulando quem já está na lista.
+ *
+ * Devolve também QUEM entrou, e não só a lista nova, porque a diferença entre
+ * "coloquei 5" e "3 já estavam lá" é a única resposta útil depois do clique —
+ * reconstruí-la comparando os dois arrays no chamador é trabalho repetido e uma
+ * chance a mais de divergir da regra de duplicata que vive aqui.
+ *
+ * `entries` volta por identidade quando ninguém entra, para não disparar
+ * gravação no localStorage nem render à toa.
+ *
+ * @returns {{entries: object[], added: string[]}}
+ */
+export function addEntries(entries, vehicles, maintenanceDate = null, note = '') {
+  let next = entries
+  const added = []
+  for (const vehicle of vehicles || []) {
+    const before = next
+    next = addEntry(next, vehicle, maintenanceDate, note)
+    if (next !== before) added.push(String(vehicle).trim())
+  }
+  return { entries: next, added }
+}
+
 export function removeEntry(entries, vehicle) {
   return entries.filter((e) => e.vehicle !== String(vehicle))
 }

@@ -7,6 +7,7 @@ import {
   OBS_STATUS,
   OBSERVATION_DAYS,
   chartWindow,
+  daysOutsideWindow,
   dayCount,
   dayShifts,
   missingDayRuns,
@@ -98,15 +99,20 @@ function DailySeries({ vehicle, byDay, days, res, maintenanceDate, isOpen }) {
   )
 }
 
-export function Card({ entry, res, byDay, rows, isOpen, onToggle, onRemove, onPatch }) {
+export function Card({ entry, res, byDay, rows, range, isOpen, onToggle, onRemove, onPatch }) {
   const { vehicle, maintenanceDate, note } = entry
   const dateRef = useRef(null)
   const noteRef = useRef(null)
 
   const total = useMemo(() => Object.values(byDay).reduce((a, v) => a + dayCount(v), 0), [byDay])
-  const days = useMemo(() => chartWindow(byDay, maintenanceDate), [byDay, maintenanceDate])
+  // o gráfico desenha só o período exibido; o veredito segue vindo da série toda
+  const days = useMemo(
+    () => chartWindow(byDay, maintenanceDate, range),
+    [byDay, maintenanceDate, range],
+  )
   const gapDays = missingDayCount(days, byDay)
   const unsplitDays = unsplitDayCount(days, byDay)
+  const outsideDays = daysOutsideWindow(byDay, days)
   const hasSeries = Object.keys(byDay).length > 0
 
   // O detalhe varre as linhas do export inteiro; só vale a pena para o card
@@ -224,6 +230,17 @@ export function Card({ entry, res, byDay, rows, isOpen, onToggle, onRemove, onPa
             sem turno <b>{unsplitDays}</b> dia(s)
           </span>
         ) : null}
+        {/* O gráfico mostra só o período exibido, mas o veredito conta a série
+            inteira. Sem dizer quantos dias ficaram de fora, o card afirma
+            "reincidente" sobre um gráfico onde a evidência não aparece. */}
+        {outsideDays ? (
+          <span
+            className="wl-card__gap"
+            title="Dias da série acumulada fora do período exibido: não são desenhados, mas continuam contando nas médias e no veredito de reincidência. Use o filtro de período, ou carregue os exports daqueles dias, para vê-los."
+          >
+            fora do período <b>{outsideDays}</b> dia(s)
+          </span>
+        ) : null}
       </div>
 
       {hasSeries && days.length ? (
@@ -254,6 +271,13 @@ export function Card({ entry, res, byDay, rows, isOpen, onToggle, onRemove, onPa
             </p>
           ) : null}
         </>
+      ) : hasSeries ? (
+        // tem série, mas nenhum dia dela cai no período exibido — dizer isso é
+        // o que impede a leitura de "este equipamento não tem histórico"
+        <div className="empty">
+          A série deste equipamento ({outsideDays} dia(s)) está inteira fora do período exibido.
+          Amplie o filtro de período para vê-la; o veredito acima já a considera.
+        </div>
       ) : (
         <div className="empty">Sem série diária registrada para este equipamento.</div>
       )}

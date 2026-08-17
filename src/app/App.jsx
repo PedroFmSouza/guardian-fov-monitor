@@ -1,18 +1,29 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
+
 import { refreshColorTokens } from '../charts/base.js'
 import { fmtInt } from '../ui/kpis.js'
 import { Header, Metagrid, Footer } from './Chrome.jsx'
+import { DateFilter } from './DateFilter.jsx'
 import { ChartThemeContext } from './hooks.js'
 import { Ingest } from './Ingest.jsx'
 import { OverviewPanel } from './overview/OverviewPanel.jsx'
+import { useDateFilter } from './useDateFilter.js'
 import { useReport } from './useReport.js'
 import { useWatchlist } from './useWatchlist.js'
+import { today } from './watchlist/shared.js'
 import { WatchlistPanel } from './watchlist/WatchlistPanel.jsx'
 
 export function App() {
   const watchlist = useWatchlist()
   const report = useReport(watchlist.mergeSeries)
+
+  /**
+   * Recorte por data da LEITURA. Deriva das linhas já unidas, depois da
+   * ingestão: o que o filtro esconde nunca deixou de ser gravado na série
+   * diária do painel de observação.
+   */
+  const filter = useDateFilter(report.rows, report.meta)
 
   // Chart.js grava as cores no dataset na montagem e não referencia o CSS ao
   // vivo. Trocar o tema exige reler os tokens e REMONTAR os gráficos — o
@@ -26,26 +37,49 @@ export function App() {
   const generatedAt = useMemo(() => new Date().toLocaleString('pt-BR'), [])
   const { meta, historyCount } = report
 
+  /**
+   * A faixa de metadados descreve o que está NA TELA, não o que está em disco.
+   * Com o filtro ativo ela segue o recorte — inclusive para zero, caso em que o
+   * período exibido vem do intervalo pedido, já que não há dado de onde tirá-lo.
+   */
+  const shown = filter.meta
+
+  /** Equipamentos já em observação: o botão do ranking não recoloca ninguém. */
+  const observed = useMemo(
+    () => new Set(watchlist.entries.map((e) => e.vehicle)),
+    [watchlist.entries],
+  )
+
+  const observeDate = watchlist.defaultDate || today()
+  const observeTop = useCallback(
+    (vehicles) => watchlist.addMany(vehicles, observeDate, ''),
+    [watchlist, observeDate],
+  )
+
   const cells = [
     {
       key: 'period',
-      label: 'Período coberto',
-      value: meta ? `${meta.periodStart} → ${meta.periodEnd} (${meta.days.length}d)` : '—',
+      label: 'Período exibido',
+      value: !shown
+        ? '—'
+        : shown.periodStart
+          ? `${shown.periodStart} → ${shown.periodEnd} (${shown.days.length}d)`
+          : `${filter.range.from} → ${filter.range.to} (0d)`,
     },
     {
       key: 'vehicles',
       label: 'Equipamentos',
-      value: meta ? fmtInt(meta.vehicles.length) : '—',
+      value: shown ? fmtInt(shown.vehicles.length) : '—',
     },
     {
       key: 'shifts',
       label: 'Turnos',
-      value: meta && meta.shifts.length ? meta.shifts.join(' · ') : '—',
+      value: shown && shown.shifts.length ? shown.shifts.join(' · ') : '—',
     },
     {
       key: 'rows',
       label: 'Registros processados',
-      value: meta ? fmtInt(meta.rowCount) : '—',
+      value: shown ? fmtInt(shown.rowCount) : '—',
     },
     {
       key: 'sheet',
@@ -60,16 +94,19 @@ export function App() {
   ]
 
   // Superfície de introspecção para QA (scripts/smoke.mjs): só expõe agregados
-  // que já estão visíveis na tela. A aplicação não lê.
+  // que já estão visíveis na tela — por isso segue o recorte, não o total em
+  // disco. Sem filtro os dois coincidem, que é o estado em que o smoke roda.
+  // A aplicação não lê.
   useEffect(() => {
-    window.__gfmReport = meta
+    window.__gfmReport = shown
       ? {
           fileCount: report.files.length,
-          rowCount: meta.rowCount,
-          fovCount: meta.fovCount,
+          rowCount: shown.rowCount,
+          fovCount: shown.fovCount,
+          filtered: filter.active,
         }
-      : { fileCount: 0, rowCount: 0, fovCount: 0 }
-  }, [meta, report.files.length])
+      : { fileCount: 0, rowCount: 0, fovCount: 0, filtered: false }
+  }, [shown, report.files.length, filter.active])
 
   return (
     <ChartThemeContext.Provider value={themeEpoch}>
@@ -77,15 +114,19 @@ export function App() {
         <Header onThemeChange={onThemeChange} />
 
         <div id="report-status" className="sr-only" role="status" aria-live="polite">
-          {meta
-            ? `Relatório atualizado: ${fmtInt(meta.rowCount)} registros, ${fmtInt(
-                meta.fovCount,
-              )} exceções de FOV, ${fmtInt(meta.vehicles.length)} equipamentos.`
+          {shown
+            ? `Relatório atualizado: ${fmtInt(shown.rowCount)} registros, ${fmtInt(
+                shown.fovCount,
+              )} exceções de FOV, ${fmtInt(shown.vehicles.length)} equipamentos${
+                filter.active ? ', no período filtrado' : ''
+              }.`
             : 'Nenhum relatório carregado.'}
         </div>
 
         <main id="main-content" tabIndex={-1}>
           <Metagrid cells={cells} />
+
+          {meta ? <DateFilter filter={filter} fullMeta={meta} /> : null}
 
           <section className="panel" aria-label="Carga de dados">
             <div className="panel__head">
@@ -114,11 +155,19 @@ export function App() {
                 detectar se a falha volta a ocorrer. Cada equipamento tem sua própria data de
                 manutenção; a série diária é acumulada entre uploads e deduplicada por data. Use{' '}
                 <strong>Detalhar</strong> para abrir hora do dia, causa raiz e duração do
-                equipamento, comparando antes e depois da manutenção.
+                equipamento, comparando antes e depois da manutenção. O gráfico de cada card desenha
+                apenas o <strong>período exibido</strong>, para não misturar semanas que não estão em
+                nenhum arquivo aberto; o <strong>veredito</strong> de reincidência continua contado
+                sobre a série acumulada inteira, e o card avisa quantos dias ficaram fora do desenho.
               </p>
             </div>
             <div id="watchlist-host">
-              <WatchlistPanel watchlist={watchlist} rows={report.rows} meta={report.meta} />
+              <WatchlistPanel
+                watchlist={watchlist}
+                rows={report.rows}
+                meta={report.meta}
+                range={filter.range}
+              />
             </div>
           </section>
 
@@ -126,14 +175,24 @@ export function App() {
             <div className="panel__head">
               <h2 className="panel__title">Visão geral da frota</h2>
               <p className="panel__sub">
-                Leitura do <strong>export carregado agora</strong>, com a frota inteira: para onde a
+                Leitura do <strong>período exibido</strong>, com a frota inteira: para onde a
                 tendência aponta, quais equipamentos estão piores, em que hora do dia acontece e por
-                quê. Nada aqui é persistido nem atravessa uploads — o acompanhamento entre semanas
-                vive no painel de observação, acima.
+                quê. Segue o filtro de período acima. Nada aqui é persistido nem atravessa uploads —
+                o acompanhamento entre semanas vive no painel de observação, acima.
               </p>
             </div>
             <div id="overview-host">
-              <OverviewPanel rows={report.rows} />
+              <OverviewPanel
+                rows={filter.rows}
+                observed={observed}
+                onObserve={observeTop}
+                defaultDate={observeDate}
+                emptyReason={
+                  !meta
+                    ? 'Carregue um export para ver a visão geral da frota — tendência, ranking, hora do dia e causa raiz.'
+                    : 'Nenhum registro no período filtrado. Amplie o intervalo acima ou use "Tudo".'
+                }
+              />
             </div>
           </section>
         </main>
