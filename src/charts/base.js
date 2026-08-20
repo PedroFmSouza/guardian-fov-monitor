@@ -90,16 +90,21 @@ export function withAlpha(color, alpha) {
  * @param {CanvasRenderingContext2D} ctx
  * @param {{top: number, bottom: number, left: number, right: number}} chartArea
  * @param {object} scales escalas do Chart.js (usa a x)
- * @param {number[][]} runs pares [início, fim] de índices inclusivos
- * @param {{label: string, color: string}} opts
+ * @param {number[][]} runs pares [início, fim]
+ * @param {{label: string, color: string, byValue?: boolean}} opts
+ *        `byValue` trata os pares como VALORES do eixo (ex. minuto decorrido),
+ *        não como índices de categoria. Num eixo linear a meia-casa do índice
+ *        não existe, e somá-la deslocaria a faixa por meio ponto.
  */
-export function drawGapBands(ctx, chartArea, scales, runs, { label, color }) {
+export function drawGapBands(ctx, chartArea, scales, runs, { label, color, byValue = false }) {
   if (!Array.isArray(runs) || !runs.length) return
   const { top, bottom, left, right } = chartArea
   const height = bottom - top
   // largura de um passo no eixo; com um ponto só não há vão a marcar
-  const step = Math.abs(scales.x.getPixelForValue(1) - scales.x.getPixelForValue(0))
-  if (!Number.isFinite(step) || step <= 0) return
+  const step = byValue
+    ? 0
+    : Math.abs(scales.x.getPixelForValue(1) - scales.x.getPixelForValue(0))
+  if (!byValue && (!Number.isFinite(step) || step <= 0)) return
 
   for (const [from, to] of runs) {
     const x0 = Math.max(left, scales.x.getPixelForValue(from) - step / 2)
@@ -239,6 +244,16 @@ export function mount(canvasId, config) {
  * ter sido criado com a página oculta (ver applyChartDefaults): ao voltar para
  * a aba, o canvas é reconstruído com o tamanho real do container.
  */
+/**
+ * A instância montada num canvas, para atualização no lugar.
+ *
+ * Recriar o gráfico zeraria o enquadramento — e é exatamente durante o zoom que
+ * a resolução da série muda. Quem troca só os dados usa isto.
+ */
+export function getChart(canvasId) {
+  return instances.get(canvasId) || null
+}
+
 /** Volta o gráfico ao enquadramento original (botão "Ver tudo"). */
 export function resetZoom(canvasId) {
   const chart = instances.get(canvasId)

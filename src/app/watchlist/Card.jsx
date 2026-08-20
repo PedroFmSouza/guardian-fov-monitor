@@ -1,6 +1,6 @@
-import { useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { renderHourlyChart } from '../../charts/hourlyChart.js'
+import { renderBinnedChart, updateBinnedChart } from '../../charts/hourlyChart.js'
 import { resetZoom } from '../../charts/base.js'
 import { buildVehicleDetail } from '../../aggregate/vehicleDetail.js'
 import {
@@ -13,7 +13,7 @@ import {
   unsplitDayCount,
   causelessDayCount,
 } from '../../aggregate/byDailyVehicle.js'
-import { hourlyCauseSeries } from '../../aggregate/byHourVehicle.js'
+import { binnedCauseSeries, binLabel, pickBin, BIN_LADDER } from '../../aggregate/byHourVehicle.js'
 import { causeLabel } from '../../aggregate/overview.js'
 import { useChart, useNativeListener } from '../hooks.js'
 import { Detail } from './Detail.jsx'
@@ -61,29 +61,86 @@ function Verdict({ res }) {
  * card (reincidência, médias pré/pós) continuam saindo da série acumulada, e é
  * por isso que o rodapé diz de onde cada coisa vem.
  */
-function HourlySeries({ vehicle, series, isOpen }) {
+function HourlySeries({ vehicle, rows, maintenanceDate, cause, range, isOpen, onResolution }) {
   const id = canvasIdFor(vehicle)
+
+  /**
+   * Resolucao ativa, em minutos por ponto.
+   *
+   * Mora aqui e nao no agregado porque quem a decide e o ZOOM: o grafico avisa
+   * quantos minutos estao visiveis e em quantos pixels, e a escada escolhe o
+   * passo mais fino que ainda tem pixel para ser desenhado.
+   */
+  const [binMinutes, setBinMinutes] = useState(BIN_LADDER[0])
+  /** Faixa à vista, em minuto decorrido. `null` = janela inteira. */
+  const [view, setView] = useState(null)
+
+  const series = useMemo(
+    () => binnedCauseSeries(rows, vehicle, { maintenanceDate, cause, bounds: range, binMinutes }),
+    [rows, vehicle, maintenanceDate, cause, range, binMinutes],
+  )
   const label = causeLabel(series.cause)
 
+  // Fechar o detalhe desliga o zoom: a resolucao volta a mais grossa, senao o
+  // grafico seria recriado com bin de minuto ocupando a janela inteira.
+  useEffect(() => {
+    if (!isOpen) {
+      setBinMinutes(BIN_LADDER[0])
+      setView(null)
+    }
+  }, [isOpen])
+
+  /**
+   * Quantas exceções estão DENTRO do enquadramento.
+   *
+   * Com 52 eventos em três semanas, a maioria das janelas de poucas horas está
+   * vazia — e um gráfico em branco no minuto é indistinguível de um gráfico
+   * quebrado. O rodapé precisa poder dizer "aqui não tem nada".
+   */
+  const visibleTotal = useMemo(() => {
+    if (!view) return series.total
+    return series.points.reduce(
+      (sum, p) => (p.y && p.x >= view.from && p.x < view.to ? sum + p.y : sum),
+      0,
+    )
+  }, [series, view])
+
+  useEffect(() => {
+    if (onResolution) onResolution(binMinutes, visibleTotal, view !== null)
+  }, [onResolution, binMinutes, visibleTotal, view])
+
+  /**
+   * A assinatura NAO inclui `binMinutes` de proposito: recriar o grafico a cada
+   * troca de resolucao zeraria o enquadramento no meio do gesto de zoom que
+   * pediu a troca. A janela, a causa e o zoom recriam; o bin so troca os dados.
+   */
   useChart(
     id,
     () =>
-      renderHourlyChart(id, series.hours, series.values, {
-        cutIndex: series.cutIndex,
+      renderBinnedChart(id, series, {
         causeLabel: label,
-        // Zoom só no card aberto: fechado, a roda do mouse precisa continuar
-        // rolando a página em vez de ampliar o gráfico.
+        // Zoom so no card aberto: fechado, a roda do mouse precisa continuar
+        // rolando a pagina em vez de ampliar o grafico.
         zoom: isOpen,
+        onViewportChange: (v) => {
+          setBinMinutes(pickBin(v.spanMinutes, v.widthPx))
+          setView({ from: v.from, to: v.to })
+        },
       }),
-    `${series.hours.length}|${series.values.join()}|${series.cutIndex}|${series.cause}|${isOpen}`,
+    `${series.windowStart}|${series.spanMinutes}|${series.cause}|${series.total}|${isOpen}`,
   )
+
+  // troca de resolucao: dados no lugar, enquadramento preservado
+  useEffect(() => {
+    updateBinnedChart(id, series)
+  }, [id, series])
 
   return (
     <div className={`chartbox chartbox--hourly${isOpen ? ' chartbox--zoom' : ''}`}>
       <canvas
         id={id}
         role="img"
-        aria-label={`${label}: exceções de FOV do equipamento ${vehicle} hora a hora, ${series.total} no período de ${series.coveredDays} dia(s) do export.`}
+        aria-label={`${label}: excecoes de FOV do equipamento ${vehicle} ao longo do tempo, ${series.total} no periodo de ${series.coveredDays} dia(s) do export.`}
       />
     </div>
   )
@@ -124,14 +181,26 @@ export function Card({
   const hasSeries = Object.keys(byDay).length > 0
 
   /**
-   * Série horária desenhada no card. Sai do export (única fonte com hora) e
-   * segue o mesmo período e a mesma causa escolhidos na barra de filtro —
-   * quando nenhuma causa está isolada, cai em câmera desalinhada.
+   * Metadados da janela desenhada — dias cobertos, vãos, causa, total.
+   *
+   * Calculado na resolução mais grossa de propósito: nada disso depende do bin,
+   * e a série fina só interessa a quem desenha. O gráfico monta a sua própria,
+   * na resolução que o zoom estiver pedindo.
    */
-  const hourly = useMemo(
-    () => hourlyCauseSeries(rows, vehicle, { maintenanceDate, cause, bounds: range }),
+  const windowInfo = useMemo(
+    () =>
+      binnedCauseSeries(rows, vehicle, {
+        maintenanceDate,
+        cause,
+        bounds: range,
+        binMinutes: BIN_LADDER[0],
+      }),
     [rows, vehicle, maintenanceDate, cause, range],
   )
+
+  /** O que o gráfico está mostrando agora — resolução e o que cabe no enquadramento. */
+  const [view, setView] = useState({ bin: BIN_LADDER[0], visible: null, zoomed: false })
+  const onResolution = useCallback((bin, visible, zoomed) => setView({ bin, visible, zoomed }), [])
 
   // O detalhe varre as linhas do export inteiro; só vale a pena para o card
   // aberto — calcular para todos a cada render seria desperdício.
@@ -272,25 +341,43 @@ export function Card({
         ) : null}
       </div>
 
-      {hourly.hours.length ? (
+      {windowInfo.points.length ? (
         <>
-          <HourlySeries vehicle={vehicle} series={hourly} isOpen={isOpen} />
+          <HourlySeries
+            vehicle={vehicle}
+            rows={rows}
+            maintenanceDate={maintenanceDate}
+            cause={cause}
+            range={range}
+            isOpen={isOpen}
+            onResolution={onResolution}
+          />
           <p className="wl-zoomhint">
             {/* Um único item de flex: o `gap` do container serve para separar o
                 botão, e com o <b> solto ele abria espaço no meio da frase
                 ("Câmera desalinhada , hora a hora"). */}
             <span>
-              <b>{causeLabel(hourly.cause)}</b>, hora a hora ·{' '}
-              {`${hourly.coveredDays} dia(s) = ${hourly.values.length} horas`}
-              {hourly.missingDays ? ` · ${hourly.missingDays} dia(s) sem arquivo` : ''}
-              {isOpen ? ' · roda do mouse amplia, arraste para deslocar' : ''}
+              <b>{causeLabel(windowInfo.cause)}</b> ·{' '}
+              {`${windowInfo.coveredDays} dia(s) · ${binLabel(view.bin)} por ponto`}
+              {windowInfo.missingDays ? ` · ${windowInfo.missingDays} dia(s) sem arquivo` : ''}
+              {/* Enquadramento vazio é o caso COMUM na resolução de minuto: com
+                  dezenas de eventos em semanas, a maioria das janelas de poucas
+                  horas não tem nada. Dizer isso evita que um gráfico correto e
+                  em branco pareça um gráfico quebrado. */}
+              {view.zoomed && view.visible === 0 ? ' · nenhuma exceção neste enquadramento' : ''}
+              {isOpen ? ' · roda do mouse amplia e refina a resolução, arraste para deslocar' : ''}
             </span>
             {isOpen ? (
               <button
                 className="btn btn--ghost btn--sm"
                 type="button"
                 data-zoomreset={vehicle}
-                onClick={() => resetZoom(canvasIdFor(vehicle))}
+                onClick={() => {
+                  resetZoom(canvasIdFor(vehicle))
+                  // o reset não passa pelo callback de zoom do plugin: sem isto,
+                  // a série voltaria ao enquadramento cheio ainda em bin fino
+                  setView({ bin: BIN_LADDER[0], visible: null, zoomed: false })
+                }}
               >
                 Ver tudo
               </button>

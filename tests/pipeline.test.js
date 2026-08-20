@@ -69,7 +69,15 @@ import {
   WORST_DAY_PROFILES_UNSPLIT,
 } from '../src/aggregate/vehicleDetail.js'
 import { fleetDaily, fleetByHour, fleetByCause, causeLabel } from '../src/aggregate/overview.js'
-import { hourlyCauseSeries, CAMERA_MISALIGNED } from '../src/aggregate/byHourVehicle.js'
+import {
+  binnedCauseSeries,
+  pickBin,
+  binLabel,
+  offsetToClock,
+  BIN_LADDER,
+  CAMERA_MISALIGNED,
+  MINUTES_PER_DAY,
+} from '../src/aggregate/byHourVehicle.js'
 
 const EXCEL_EPOCH = Date.UTC(1899, 11, 30)
 const serial = (iso) => (Date.parse(`${iso}Z`) - EXCEL_EPOCH) / 86400000
@@ -1328,87 +1336,140 @@ test('recarregar um export antigo preenche a causa dos dias que não sabiam', ()
   assert.equal(dayCount(merged[707]['2026-07-06']), 2, 'e o total não mudou')
 })
 
-/* ------------------------------- série horária do card (por causa raiz) */
 
-test('hourlyCauseSeries conta só a causa pedida, hora a hora', () => {
-  const at = (day, hour, cause) => ({
+/* ------------- série do card: resolução variável, filtrada por causa raiz */
+
+/** Evento de FOV num instante exato, para montar séries sub-diárias. */
+const at = (day, hour, minute, cause = 'camera misaligned') => {
+  const [y, m, d] = day.split('-').map(Number)
+  return {
     vehicle: '707',
     dayKey: day,
     hour,
     isFov: true,
     cause,
-  })
-  const rows = [
-    at('2026-07-06', 5, 'camera misaligned'),
-    at('2026-07-06', 5, 'camera misaligned'),
-    at('2026-07-06', 5, 'tracking issue'),
-    at('2026-07-06', 17, 'camera misaligned'),
-    { vehicle: '224', dayKey: '2026-07-06', hour: 5, isFov: true, cause: 'camera misaligned' },
-  ]
-  const s = hourlyCauseSeries(rows, '707', {})
+    detectionTime: new Date(Date.UTC(y, m - 1, d, hour, minute, 0)),
+  }
+}
 
-  assert.equal(s.values.length, 24, 'um dia = 24 pontos')
-  assert.equal(s.values[5], 2, 'a causa pedida soma')
-  assert.equal(s.values[17], 1)
-  assert.equal(s.values[0], 0, 'hora medida sem evento é 0, não ausente')
-  assert.equal(s.total, 3, 'outra causa e outro equipamento ficam de fora')
-  assert.equal(s.cause, CAMERA_MISALIGNED)
+test('binnedCauseSeries conta só a causa pedida, no bin pedido', () => {
+  const rows = [
+    at('2026-07-06', 5, 3),
+    at('2026-07-06', 5, 47),
+    at('2026-07-06', 5, 10, 'tracking issue'),
+    { ...at('2026-07-06', 5, 3), vehicle: '224' },
+  ]
+
+  const hora = binnedCauseSeries(rows, '707', { binMinutes: 60 })
+  assert.equal(hora.points.length, 24, 'um dia em bin de hora')
+  assert.equal(hora.total, 2, 'outra causa e outro equipamento ficam de fora')
+  assert.deepEqual(
+    hora.points.filter((p) => p.y > 0),
+    [{ x: 300, y: 2 }],
+    'os dois eventos caem na mesma hora',
+  )
+
+  const minuto = binnedCauseSeries(rows, '707', { binMinutes: 1 })
+  assert.equal(minuto.points.length, MINUTES_PER_DAY)
+  assert.deepEqual(
+    minuto.points.filter((p) => p.y > 0),
+    [
+      { x: 303, y: 1 },
+      { x: 347, y: 1 },
+    ],
+    'no minuto eles se separam, no instante exato',
+  )
+  assert.equal(minuto.total, hora.total, 'refinar a resolução não cria nem perde evento')
 })
 
-test('dia que o export não cobre vira null, e não zero', () => {
-  const rows = [
-    { vehicle: '707', dayKey: '2026-07-06', hour: 9, isFov: true, cause: 'camera misaligned' },
-    { vehicle: '707', dayKey: '2026-07-08', hour: 9, isFov: true, cause: 'camera misaligned' },
-  ]
-  const s = hourlyCauseSeries(rows, '707', {})
+test('o eixo é minuto decorrido, então o instante não se move com a resolução', () => {
+  const rows = [at('2026-07-06', 9, 30)]
+  const posicoes = BIN_LADDER.map((binMinutes) => {
+    const s = binnedCauseSeries(rows, '707', { binMinutes })
+    const spike = s.points.find((p) => p.y > 0)
+    return { binMinutes, x: spike.x }
+  })
+  // o bin arredonda para baixo, mas sempre para dentro do mesmo instante
+  for (const { binMinutes, x } of posicoes) {
+    assert.ok(x <= 570 && x > 570 - binMinutes, `bin de ${binMinutes}min cai sobre 09:30`)
+  }
+})
+
+test('dia que o export não cobre vira null, e o vão sai em minutos', () => {
+  const rows = [at('2026-07-06', 9, 0), at('2026-07-08', 9, 0)]
+  const s = binnedCauseSeries(rows, '707', { binMinutes: 60 })
+
   assert.equal(s.days.length, 3, 'a faixa é contínua')
-  assert.equal(s.values.length, 72)
-  assert.equal(s.values[9], 1)
-  assert.equal(s.values[24 + 9], null, '07/07 não está em arquivo nenhum')
+  assert.equal(s.points.length, 72)
+  assert.equal(s.points[24 + 9].y, null, '07/07 não está em arquivo nenhum')
   assert.ok(
-    s.values.slice(24, 48).every((v) => v === null),
+    s.points.slice(24, 48).every((p) => p.y === null),
     'o dia inteiro fica em branco',
   )
+  assert.deepEqual(s.gaps, [[MINUTES_PER_DAY, 2 * MINUTES_PER_DAY]])
   assert.equal(s.missingDays, 1)
   assert.equal(s.coveredDays, 2)
 })
 
 test('a linha da manutenção cai na primeira hora do dia da intervenção', () => {
-  const rows = ['2026-07-06', '2026-07-07', '2026-07-08'].map((d) => ({
-    vehicle: '707',
-    dayKey: d,
-    hour: 9,
-    isFov: true,
-    cause: 'camera misaligned',
-  }))
-  const s = hourlyCauseSeries(rows, '707', { maintenanceDate: '2026-07-07' })
-  assert.equal(s.cutIndex, 24, 'segundo dia da janela × 24h')
-  assert.equal(s.hours[s.cutIndex].day, '2026-07-07')
-  assert.equal(s.hours[s.cutIndex].hour, 0)
+  const rows = ['2026-07-06', '2026-07-07', '2026-07-08'].map((d) => at(d, 9, 0))
+  const s = binnedCauseSeries(rows, '707', { maintenanceDate: '2026-07-07' })
+  assert.equal(s.cutX, MINUTES_PER_DAY, 'segundo dia da janela, em minutos')
+  assert.equal(binnedCauseSeries(rows, '707', {}).cutX, null)
+})
 
-  const semData = hourlyCauseSeries(rows, '707', {})
-  assert.equal(semData.cutIndex, -1)
+test('o período escolhido no filtro recorta a série', () => {
+  const rows = ['2026-07-06', '2026-07-07', '2026-07-08', '2026-07-09'].map((d) => at(d, 9, 0))
+  const s = binnedCauseSeries(rows, '707', { bounds: { from: '2026-07-07', to: '2026-07-08' } })
+  assert.deepEqual(s.days, ['2026-07-07', '2026-07-08'])
+  assert.equal(s.total, 2, 'só o que está dentro do período pedido')
+  assert.equal(s.windowStart, '2026-07-07', 'o eixo passa a contar do novo início')
 })
 
 test('equipamento fora do export devolve série vazia, sem quebrar', () => {
-  const s = hourlyCauseSeries([], '999', { maintenanceDate: '2026-07-07' })
+  const s = binnedCauseSeries([], '999', { maintenanceDate: '2026-07-07' })
   assert.equal(s.inExport, false)
-  assert.deepEqual(s.hours, [])
+  assert.deepEqual(s.points, [])
   assert.equal(s.total, 0)
 })
 
-test('o período escolhido no filtro recorta a série horária', () => {
-  const rows = ['2026-07-06', '2026-07-07', '2026-07-08', '2026-07-09'].map((d) => ({
-    vehicle: '707',
-    dayKey: d,
-    hour: 9,
-    isFov: true,
-    cause: 'camera misaligned',
-  }))
-  const s = hourlyCauseSeries(rows, '707', {
-    bounds: { from: '2026-07-07', to: '2026-07-08' },
+test('pickBin nunca desce abaixo de um ponto por pixel', () => {
+  // 21 dias em 1240px: minuto daria 24 pontos por pixel, hora dá 0,4
+  assert.equal(pickBin(21 * MINUTES_PER_DAY, 1240), 60)
+  assert.equal(pickBin(2880, 1240), 5, '48h visíveis comportam 5 minutos')
+  assert.equal(pickBin(360, 1240), 1, '6h visíveis comportam o minuto')
+
+  // qualquer enquadramento respeita o teto de pontos por pixel
+  for (const span of [30240, 10080, 2880, 720, 360, 60]) {
+    const bin = pickBin(span, 1240)
+    assert.ok(span / bin <= 1240 / 2, `${span}min em bin de ${bin}min cabe na largura`)
+    assert.ok(BIN_LADDER.includes(bin))
+  }
+  // tela estreita escolhe passo mais grosso que tela larga
+  assert.ok(pickBin(2880, 400) >= pickBin(2880, 1240))
+})
+
+test('offsetToClock devolve o relógio de parede do minuto decorrido', () => {
+  assert.deepEqual(offsetToClock('2026-07-06', 0), { day: '2026-07-06', hour: 0, minute: 0 })
+  assert.deepEqual(offsetToClock('2026-07-06', 330), { day: '2026-07-06', hour: 5, minute: 30 })
+  assert.deepEqual(offsetToClock('2026-07-06', MINUTES_PER_DAY + 61), {
+    day: '2026-07-07',
+    hour: 1,
+    minute: 1,
   })
-  assert.deepEqual(s.days, ['2026-07-07', '2026-07-08'])
-  assert.equal(s.values.length, 48)
-  assert.equal(s.total, 2, 'só as horas dentro do período pedido')
+})
+
+test('binLabel nomeia a resolução ativa', () => {
+  assert.equal(binLabel(60), '1 hora')
+  assert.equal(binLabel(15), '15 minutos')
+  assert.equal(binLabel(1), '1 minuto')
+})
+
+test('a causa padrão é câmera desalinhada, e o filtro sobrepõe', () => {
+  const rows = [at('2026-07-06', 5, 0), at('2026-07-06', 6, 0, 'sensor covered')]
+  assert.equal(binnedCauseSeries(rows, '707', {}).cause, CAMERA_MISALIGNED)
+  assert.equal(binnedCauseSeries(rows, '707', {}).total, 1)
+  const outra = binnedCauseSeries(rows, '707', { cause: 'sensor covered' })
+  assert.equal(outra.total, 1)
+  assert.equal(outra.points.find((p) => p.y > 0).x, 360)
 })

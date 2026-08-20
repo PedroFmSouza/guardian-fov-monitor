@@ -278,11 +278,31 @@ indicados manualmente e ficam em observação para responder uma pergunta só �
   desenhava uma linha `LIMIAR` sobre a série sem baseline, sem janela pós e sem
   avaliação nenhuma por trás. O card agora diz que não há critério, em vez de
   exibir um número inventado.
-- **O gráfico do card é por HORA, de uma causa só.** Eixo de 24 pontos por dia —
-  três semanas passam de 500 pontos —, por isso cada card ocupa a linha inteira e
-  eles ficam empilhados: em três colunas, uma hora não chegava a um pixel. A
-  causa é a que estiver isolada na barra de filtro e cai em **câmera desalinhada**
-  quando nenhuma está; o período é o da barra, como no resto da tela.
+- **O gráfico do card tem resolução variável, de uma causa só.** Começa em uma
+  hora por ponto e refina com o zoom: 15 min, 5 min, até **um minuto**. Quem
+  escolhe é `pickBin`, pela conta de pixels — nunca desenha bin menor do que a
+  tela consegue mostrar. Em 21 dias e 1240px, minuto daria 24 pontos por pixel;
+  hora dá 0,4. Não há passo abaixo de um minuto: o dado tem segundo, mas 21 dias
+  em segundos seriam 1,8 milhão de pontos, ou 1.400 por pixel.
+- **O eixo x é MINUTO DECORRIDO, não índice de ponto.** É o que permite trocar a
+  resolução sem perder o enquadramento: mudar o bin muda quantos pontos existem,
+  não onde cada instante cai no eixo. A troca acontece por `updateBinnedChart`,
+  que substitui os dados no lugar — recriar o gráfico zeraria o zoom bem no meio
+  do gesto que pediu mais detalhe. Por isso `binMinutes` fica **fora** da
+  assinatura do `useChart`.
+- **Os rótulos do eixo seguem o relógio, não o número redondo.** Um eixo linear
+  em minutos escolheria passo 100 ou 500, que como tempo não querem dizer nada;
+  `TICK_STEPS` só tem múltiplos de relógio, e o formato acompanha (`14/07` →
+  `12h` → `07:30`). A virada da meia-noite sempre ganha a data, senão uma tira de
+  horas some do calendário.
+- **Enquadramento vazio é o caso comum no minuto** — dezenas de eventos em
+  semanas deixam a maioria das janelas de poucas horas sem nada. O rodapé diz
+  "nenhuma exceção neste enquadramento", senão um gráfico correto e em branco
+  parece um gráfico quebrado.
+- **A causa é a que estiver isolada na barra de filtro**, e cai em **câmera
+  desalinhada** quando nenhuma está; o período é o da barra, como no resto da tela.
+  Cada card ocupa a linha inteira e eles ficam empilhados: em três colunas, uma
+  hora não chegava a um pixel.
 - **Esse gráfico vem do export aberto, não da série acumulada.** Hora só existe no
   arquivo carregado: o `localStorage` guarda contagem por DIA. Os vereditos
   (reincidência, médias pré/pós) continuam saindo da série acumulada — daí o card
