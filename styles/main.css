@@ -694,8 +694,12 @@ select.field__input {
   height: 300px;
 }
 
-.chartbox--mini {
-  height: 132px;
+/* A série horária tem 24 pontos por DIA — três semanas passam de 500 pontos.
+   Por isso o card ocupa a linha inteira (ver .wl-grid) e o gráfico é mais alto
+   que a antiga miniatura: em 132px de altura e um terço da largura, os picos de
+   uma hora não tinham pixel onde aparecer. */
+.chartbox--hourly {
+  height: 196px;
 }
 
 /* card aberto: a série vira o gráfico principal da leitura, não uma miniatura */
@@ -812,10 +816,13 @@ select.field__input {
   line-height: 1.1;
 }
 
+/* Uma coluna, sempre: o gráfico do card é uma série horária longa e precisa da
+   largura inteira para o eixo do tempo respirar. Em três colunas, cada hora
+   ficava com menos de um pixel e a linha virava um borrão. */
 .wl-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
 }
 
 .wl-card {

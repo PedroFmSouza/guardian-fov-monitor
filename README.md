@@ -278,6 +278,20 @@ indicados manualmente e ficam em observação para responder uma pergunta só �
   desenhava uma linha `LIMIAR` sobre a série sem baseline, sem janela pós e sem
   avaliação nenhuma por trás. O card agora diz que não há critério, em vez de
   exibir um número inventado.
+- **O gráfico do card é por HORA, de uma causa só.** Eixo de 24 pontos por dia —
+  três semanas passam de 500 pontos —, por isso cada card ocupa a linha inteira e
+  eles ficam empilhados: em três colunas, uma hora não chegava a um pixel. A
+  causa é a que estiver isolada na barra de filtro e cai em **câmera desalinhada**
+  quando nenhuma está; o período é o da barra, como no resto da tela.
+- **Esse gráfico vem do export aberto, não da série acumulada.** Hora só existe no
+  arquivo carregado: o `localStorage` guarda contagem por DIA. Os vereditos
+  (reincidência, médias pré/pós) continuam saindo da série acumulada — daí o card
+  ter dois rodapés, um dizendo de onde vem cada coisa. Equipamento fora do export
+  atual mostra o aviso em vez de um gráfico vazio.
+- **Sem linha de LIMIAR no eixo horário.** O limiar de reincidência é um valor por
+  dia; desenhá-lo sobre contagem por hora compararia o número certo na escala
+  errada. Com o zoom fechado a ponto de o dia não caber, o eixo troca o rótulo de
+  dia por hora, senão ficaria sem âncora nenhuma.
 - **Detalhar** (por equipamento) abre, sempre partido em antes × depois da
   manutenção: hora do dia, turno, causa raiz, duração (mediana/P90) e os dias
   piores da série acumulada, mais o **pior turno** — decidido pelo pós-manutenção

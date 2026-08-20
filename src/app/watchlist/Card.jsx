@@ -1,6 +1,6 @@
 import { useMemo, useRef } from 'react'
 
-import { renderWatchlistChart } from '../../charts/watchlistChart.js'
+import { renderHourlyChart } from '../../charts/hourlyChart.js'
 import { resetZoom } from '../../charts/base.js'
 import { buildVehicleDetail } from '../../aggregate/vehicleDetail.js'
 import {
@@ -9,14 +9,12 @@ import {
   chartWindow,
   daysOutsideWindow,
   dayCountFor,
-  dayShiftsFor,
-  missingDayRuns,
   missingDayCount,
-  unsplitDayRuns,
   unsplitDayCount,
-  causelessDayRuns,
   causelessDayCount,
 } from '../../aggregate/byDailyVehicle.js'
+import { hourlyCauseSeries } from '../../aggregate/byHourVehicle.js'
+import { causeLabel } from '../../aggregate/overview.js'
 import { useChart, useNativeListener } from '../hooks.js'
 import { Detail } from './Detail.jsx'
 import { STATUS_LABEL, canvasIdFor, fmtInt } from './shared.js'
@@ -55,66 +53,61 @@ function Verdict({ res }) {
   return <>Defina a data da manutenção para iniciar a observação.</>
 }
 
-/** Série diária por turno, com as faixas de vão desenhadas por cima. */
-function DailySeries({ vehicle, byDay, days, res, maintenanceDate, cause, isOpen }) {
+/**
+ * Gráfico principal do card: exceções de FOV de UMA causa, hora a hora.
+ *
+ * Vem do export carregado, não da série acumulada — hora só existe no arquivo
+ * aberto agora, porque o `localStorage` guarda contagem por dia. Os vereditos do
+ * card (reincidência, médias pré/pós) continuam saindo da série acumulada, e é
+ * por isso que o rodapé diz de onde cada coisa vem.
+ */
+function HourlySeries({ vehicle, series, isOpen }) {
   const id = canvasIdFor(vehicle)
-
-  const values = useMemo(
-    () => ({
-      // dias fora da série viram null (buraco na linha), não zero — e o mesmo
-      // vale para dia que não sabe responder pela causa isolada
-      shift1: days.map((d) => (d in byDay ? dayShiftsFor(byDay[d], cause)[0] : null)),
-      shift2: days.map((d) => (d in byDay ? dayShiftsFor(byDay[d], cause)[1] : null)),
-    }),
-    [days, byDay, cause],
-  )
+  const label = causeLabel(series.cause)
 
   useChart(
     id,
     () =>
-      renderWatchlistChart(id, days, values, {
-        maintenanceDate,
-        status: res.status,
-        // Sem data de manutenção não há baseline, e `evaluateObservation`
-        // devolve o piso (RECURRENCE_FLOOR) só como valor de partida. Passá-lo
-        // adiante desenhava uma linha LIMIAR sobre a série sem que critério
-        // nenhum estivesse sendo aplicado.
-        threshold: maintenanceDate ? res.threshold : null,
-        recurrenceDays: res.recurrenceDays,
-        // os mesmos buracos, marcados na área do gráfico — separados por motivo
-        gaps: missingDayRuns(days, byDay),
-        // com causa isolada, dia sem a quebra por causa é hachurado junto: a
-        // linha some ali, e sem faixa o vão pareceria "zero exceções"
-        unsplit: cause
-          ? [...unsplitDayRuns(days, byDay), ...causelessDayRuns(days, byDay)]
-          : unsplitDayRuns(days, byDay),
+      renderHourlyChart(id, series.hours, series.values, {
+        cutIndex: series.cutIndex,
+        causeLabel: label,
         // Zoom só no card aberto: fechado, a roda do mouse precisa continuar
-        // rolando a página em vez de ampliar uma miniatura de 132px.
+        // rolando a página em vez de ampliar o gráfico.
         zoom: isOpen,
       }),
-    `${days.join()}|${values.shift1.join()}|${values.shift2.join()}|${res.status}|${maintenanceDate || ''}|${res.threshold}|${cause || ''}|${isOpen}`,
+    `${series.hours.length}|${series.values.join()}|${series.cutIndex}|${series.cause}|${isOpen}`,
   )
 
   return (
-    <div className={`chartbox chartbox--mini${isOpen ? ' chartbox--zoom' : ''}`}>
+    <div className={`chartbox chartbox--hourly${isOpen ? ' chartbox--zoom' : ''}`}>
       <canvas
         id={id}
         role="img"
-        aria-label={`Série diária de exceções do equipamento ${vehicle}, por turno`}
+        aria-label={`${label}: exceções de FOV do equipamento ${vehicle} hora a hora, ${series.total} no período de ${series.coveredDays} dia(s) do export.`}
       />
     </div>
   )
 }
 
-export function Card({ entry, res, byDay, rows, range, cause, isOpen, onToggle, onRemove, onPatch }) {
+export function Card({
+  entry,
+  res,
+  byDay,
+  rows,
+  range,
+  cause,
+  isOpen,
+  onToggle,
+  onRemove,
+  onPatch,
+}) {
   const { vehicle, maintenanceDate, note } = entry
   const dateRef = useRef(null)
   const noteRef = useRef(null)
 
   // total da causa exibida; dias que não sabem responder não somam nada
   const total = useMemo(
-    () =>
-      Object.values(byDay).reduce((a, v) => a + (dayCountFor(v, cause) || 0), 0),
+    () => Object.values(byDay).reduce((a, v) => a + (dayCountFor(v, cause) || 0), 0),
     [byDay, cause],
   )
   // o gráfico desenha só o período exibido; o veredito segue vindo da série toda
@@ -129,6 +122,16 @@ export function Card({ entry, res, byDay, rows, range, cause, isOpen, onToggle, 
   // não muda absolutamente nada do que o card mostra
   const causelessDays = cause ? causelessDayCount(days, byDay) : 0
   const hasSeries = Object.keys(byDay).length > 0
+
+  /**
+   * Série horária desenhada no card. Sai do export (única fonte com hora) e
+   * segue o mesmo período e a mesma causa escolhidos na barra de filtro —
+   * quando nenhuma causa está isolada, cai em câmera desalinhada.
+   */
+  const hourly = useMemo(
+    () => hourlyCauseSeries(rows, vehicle, { maintenanceDate, cause, bounds: range }),
+    [rows, vehicle, maintenanceDate, cause, range],
+  )
 
   // O detalhe varre as linhas do export inteiro; só vale a pena para o card
   // aberto — calcular para todos a cada render seria desperdício.
@@ -269,24 +272,20 @@ export function Card({ entry, res, byDay, rows, range, cause, isOpen, onToggle, 
         ) : null}
       </div>
 
-      {hasSeries && days.length ? (
+      {hourly.hours.length ? (
         <>
-          <DailySeries
-            vehicle={vehicle}
-            byDay={byDay}
-            days={days}
-            res={res}
-            maintenanceDate={maintenanceDate}
-            cause={cause}
-            isOpen={isOpen}
-          />
-          {isOpen ? (
-            <p className="wl-zoomhint">
-              Roda do mouse amplia · arraste para deslocar ·{' '}
-              {gapDays
-                ? `${days.length} dias na janela, ${days.length - gapDays} com dado`
-                : `${days.length} dias na série`}
-              {unsplitDays ? ` · ${unsplitDays} sem divisão por turno` : ''}
+          <HourlySeries vehicle={vehicle} series={hourly} isOpen={isOpen} />
+          <p className="wl-zoomhint">
+            {/* Um único item de flex: o `gap` do container serve para separar o
+                botão, e com o <b> solto ele abria espaço no meio da frase
+                ("Câmera desalinhada , hora a hora"). */}
+            <span>
+              <b>{causeLabel(hourly.cause)}</b>, hora a hora ·{' '}
+              {`${hourly.coveredDays} dia(s) = ${hourly.values.length} horas`}
+              {hourly.missingDays ? ` · ${hourly.missingDays} dia(s) sem arquivo` : ''}
+              {isOpen ? ' · roda do mouse amplia, arraste para deslocar' : ''}
+            </span>
+            {isOpen ? (
               <button
                 className="btn btn--ghost btn--sm"
                 type="button"
@@ -295,15 +294,15 @@ export function Card({ entry, res, byDay, rows, range, cause, isOpen, onToggle, 
               >
                 Ver tudo
               </button>
-            </p>
-          ) : null}
+            ) : null}
+          </p>
         </>
       ) : hasSeries ? (
         // tem série, mas nenhum dia dela cai no período exibido — dizer isso é
         // o que impede a leitura de "este equipamento não tem histórico"
         <div className="empty">
-          A série deste equipamento ({outsideDays} dia(s)) está inteira fora do período exibido.
-          Amplie o filtro de período para vê-la; o veredito acima já a considera.
+          Sem hora a hora deste equipamento no período exibido — o gráfico vem do export aberto, e a
+          série acumulada dele ({outsideDays} dia(s) fora da janela) só alimenta o veredito acima.
         </div>
       ) : (
         <div className="empty">Sem série diária registrada para este equipamento.</div>

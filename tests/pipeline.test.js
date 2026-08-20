@@ -69,6 +69,7 @@ import {
   WORST_DAY_PROFILES_UNSPLIT,
 } from '../src/aggregate/vehicleDetail.js'
 import { fleetDaily, fleetByHour, fleetByCause, causeLabel } from '../src/aggregate/overview.js'
+import { hourlyCauseSeries, CAMERA_MISALIGNED } from '../src/aggregate/byHourVehicle.js'
 
 const EXCEL_EPOCH = Date.UTC(1899, 11, 30)
 const serial = (iso) => (Date.parse(`${iso}Z`) - EXCEL_EPOCH) / 86400000
@@ -358,7 +359,10 @@ test('classificação que traz só a causa não é lida como veredito de tipo', 
     row({ event_id: 'B', event_type: 'Exceção FOV', classification: 'câmera desalinhada' }),
     row({ event_id: 'C', event_type: 'Exceção FOV', classification: 'critérios não atendidos' }),
   ])
-  assert.deepEqual(rows.map((r) => r.isFov), [true, true, true])
+  assert.deepEqual(
+    rows.map((r) => r.isFov),
+    [true, true, true],
+  )
   assert.equal(reclassified, 0)
 })
 
@@ -368,7 +372,10 @@ test('sem classificação, o event_type volta a ser a única evidência', () => 
     row({ event_id: 'B', event_type: 'fadiga', classification: '' }),
     row({ event_id: 'C', event_type: 'FOV exception', classification: null }),
   ])
-  assert.deepEqual(rows.map((r) => r.isFov), [true, false, true])
+  assert.deepEqual(
+    rows.map((r) => r.isFov),
+    [true, false, true],
+  )
   assert.equal(reclassified, 0, 'fallback não é reclassificação')
 })
 
@@ -378,7 +385,10 @@ test('o .xlsx em inglês não muda de contagem com o novo critério', () => {
     row({ event_id: 'A', classification: 'FOV exception - tracking issue' }),
     row({ event_id: 'B', event_type: 'fatigue', classification: 'fatigue - confirmed' }),
   ])
-  assert.deepEqual(rows.map((r) => r.isFov), [true, false])
+  assert.deepEqual(
+    rows.map((r) => r.isFov),
+    [true, false],
+  )
   assert.equal(reclassified, 0)
 })
 
@@ -426,7 +436,12 @@ test('fleetDaily separa dia coberto sem FOV de dia sem arquivo', () => {
 
 test('fleetByHour devolve sempre 24 posições e acha o pico', () => {
   const at = (h, n) =>
-    Array.from({ length: n }, (_, i) => row({ event_id: `${h}-${i}`, detection_time: serial(`2026-07-06T${String(h).padStart(2, '0')}:30:00`) }))
+    Array.from({ length: n }, (_, i) =>
+      row({
+        event_id: `${h}-${i}`,
+        detection_time: serial(`2026-07-06T${String(h).padStart(2, '0')}:30:00`),
+      }),
+    )
   const { rows } = normalizeRows([...at(5, 3), ...at(17, 5), ...at(9, 1)])
   const profile = fleetByHour(rows)
   assert.equal(profile.hours.length, 24)
@@ -495,7 +510,11 @@ test('arquivos com dias descontínuos deixam a série com buraco, não com zeros
 test('missingDayRuns agrupa vãos separados e cobre as pontas da janela', () => {
   const byDay = { '2026-07-02': 1, '2026-07-05': 1 }
   const days = ['2026-07-01', '2026-07-02', '2026-07-03', '2026-07-04', '2026-07-05', '2026-07-06']
-  assert.deepEqual(missingDayRuns(days, byDay), [[0, 0], [2, 3], [5, 5]])
+  assert.deepEqual(missingDayRuns(days, byDay), [
+    [0, 0],
+    [2, 3],
+    [5, 5],
+  ])
   assert.equal(missingDayCount(days, byDay), 4)
   assert.deepEqual(missingDayRuns(days, {}), [[0, 5]], 'série vazia é um vão só')
   assert.deepEqual(missingDayRuns([], byDay), [], 'janela vazia não tem vão')
@@ -516,7 +535,10 @@ test('dia no formato antigo quebra a linha mas NÃO é "sem dado"', () => {
   assert.equal(unsplitDayCount(days, byDay), 1)
 
   // as duas linhas ficam sem ponto nesse dia — é o buraco que o usuário vê
-  assert.deepEqual(days.map((d) => dayShifts(byDay[d])[0]), [9, null, 16])
+  assert.deepEqual(
+    days.map((d) => dayShifts(byDay[d])[0]),
+    [9, null, 16],
+  )
   // e o total continua contando
   assert.equal(dayCount(byDay['2026-08-06']), 14)
   const res = evaluateObservation(byDay, '2026-08-04')
@@ -534,7 +556,8 @@ test('os dois motivos de buraco coexistem sem se confundir', () => {
 test('a média pós-manutenção usa só os dias com dado, e o vão é contável', () => {
   // é o que faz "pós X/dia (7d)" não mentir quando o calendário tem 12 dias
   const byDay = {}
-  for (const d of ['2026-07-15', '2026-07-16', '2026-07-17', '2026-07-18']) byDay[d] = { s1: 10, s2: 0 }
+  for (const d of ['2026-07-15', '2026-07-16', '2026-07-17', '2026-07-18'])
+    byDay[d] = { s1: 10, s2: 0 }
   for (const d of ['2026-07-20', '2026-07-21']) byDay[d] = { s1: 4, s2: 0 }
   for (const d of ['2026-07-26', '2026-07-27']) byDay[d] = { s1: 6, s2: 0 }
 
@@ -840,7 +863,10 @@ test('sem data de manutenção o bloco cai numa zona única', () => {
   // ao teto de UM lado, senão a grade encolheria pela metade sem data
   assert.equal(d.dayProfiles.all.length, 4)
   assert.ok(d.dayProfiles.all.length <= WORST_DAY_PROFILES_UNSPLIT)
-  assert.ok(d.dayProfiles.all.every((p) => p.after === false), 'sem eixo, nada é "depois"')
+  assert.ok(
+    d.dayProfiles.all.every((p) => p.after === false),
+    'sem eixo, nada é "depois"',
+  )
 })
 
 test('pior turno é decidido pelo pós-manutenção, não pelo total', () => {
@@ -906,7 +932,10 @@ test('a zona única sem data cabe o mesmo tanto de gráficos que os dois lados',
 
   // e continua ordenada por volume, decrescente
   const totals = semData.dayProfiles.all.map((d) => d.total)
-  assert.deepEqual(totals, [...totals].sort((a, b) => b - a))
+  assert.deepEqual(
+    totals,
+    [...totals].sort((a, b) => b - a),
+  )
 })
 
 test('equipamento fora do export atual é sinalizado, não quebra', () => {
@@ -1068,7 +1097,11 @@ test('equipamento sem nenhum dia no período exibido devolve janela vazia', () =
 test('isolar uma causa mantém só as exceções de FOV daquela causa', () => {
   const { rows } = normalizeRows([
     row({ event_id: 'A', classification: 'FOV exception - camera misaligned' }),
-    row({ event_id: 'B', classification: 'Exceção FOV - câmera desalinhada', event_type: 'Exceção FOV' }),
+    row({
+      event_id: 'B',
+      classification: 'Exceção FOV - câmera desalinhada',
+      event_type: 'Exceção FOV',
+    }),
     row({ event_id: 'C', classification: 'FOV exception - tracking issue' }),
     // não é FOV: não tem causa de FOV nenhuma e some ao isolar qualquer uma
     row({ event_id: 'D', event_type: 'fadiga', classification: 'fadiga - sonolência' }),
@@ -1076,10 +1109,7 @@ test('isolar uma causa mantém só as exceções de FOV daquela causa', () => {
 
   const desalinhada = filterRowsByCause(rows, 'camera misaligned')
   assert.equal(desalinhada.length, 2, 'as duas grafias colapsam na mesma causa')
-  assert.deepEqual(
-    desalinhada.map((r) => r.eventId).sort(),
-    ['A', 'B'],
-  )
+  assert.deepEqual(desalinhada.map((r) => r.eventId).sort(), ['A', 'B'])
   assert.ok(
     desalinhada.every((r) => r.isFov),
     'linha que não é FOV nunca entra no recorte por causa',
@@ -1296,4 +1326,89 @@ test('recarregar um export antigo preenche a causa dos dias que não sabiam', ()
   assert.equal(hasCauseBreakdown(merged[707]['2026-07-06']), true)
   assert.equal(dayCountFor(merged[707]['2026-07-06'], 'tracking issue'), 2)
   assert.equal(dayCount(merged[707]['2026-07-06']), 2, 'e o total não mudou')
+})
+
+/* ------------------------------- série horária do card (por causa raiz) */
+
+test('hourlyCauseSeries conta só a causa pedida, hora a hora', () => {
+  const at = (day, hour, cause) => ({
+    vehicle: '707',
+    dayKey: day,
+    hour,
+    isFov: true,
+    cause,
+  })
+  const rows = [
+    at('2026-07-06', 5, 'camera misaligned'),
+    at('2026-07-06', 5, 'camera misaligned'),
+    at('2026-07-06', 5, 'tracking issue'),
+    at('2026-07-06', 17, 'camera misaligned'),
+    { vehicle: '224', dayKey: '2026-07-06', hour: 5, isFov: true, cause: 'camera misaligned' },
+  ]
+  const s = hourlyCauseSeries(rows, '707', {})
+
+  assert.equal(s.values.length, 24, 'um dia = 24 pontos')
+  assert.equal(s.values[5], 2, 'a causa pedida soma')
+  assert.equal(s.values[17], 1)
+  assert.equal(s.values[0], 0, 'hora medida sem evento é 0, não ausente')
+  assert.equal(s.total, 3, 'outra causa e outro equipamento ficam de fora')
+  assert.equal(s.cause, CAMERA_MISALIGNED)
+})
+
+test('dia que o export não cobre vira null, e não zero', () => {
+  const rows = [
+    { vehicle: '707', dayKey: '2026-07-06', hour: 9, isFov: true, cause: 'camera misaligned' },
+    { vehicle: '707', dayKey: '2026-07-08', hour: 9, isFov: true, cause: 'camera misaligned' },
+  ]
+  const s = hourlyCauseSeries(rows, '707', {})
+  assert.equal(s.days.length, 3, 'a faixa é contínua')
+  assert.equal(s.values.length, 72)
+  assert.equal(s.values[9], 1)
+  assert.equal(s.values[24 + 9], null, '07/07 não está em arquivo nenhum')
+  assert.ok(
+    s.values.slice(24, 48).every((v) => v === null),
+    'o dia inteiro fica em branco',
+  )
+  assert.equal(s.missingDays, 1)
+  assert.equal(s.coveredDays, 2)
+})
+
+test('a linha da manutenção cai na primeira hora do dia da intervenção', () => {
+  const rows = ['2026-07-06', '2026-07-07', '2026-07-08'].map((d) => ({
+    vehicle: '707',
+    dayKey: d,
+    hour: 9,
+    isFov: true,
+    cause: 'camera misaligned',
+  }))
+  const s = hourlyCauseSeries(rows, '707', { maintenanceDate: '2026-07-07' })
+  assert.equal(s.cutIndex, 24, 'segundo dia da janela × 24h')
+  assert.equal(s.hours[s.cutIndex].day, '2026-07-07')
+  assert.equal(s.hours[s.cutIndex].hour, 0)
+
+  const semData = hourlyCauseSeries(rows, '707', {})
+  assert.equal(semData.cutIndex, -1)
+})
+
+test('equipamento fora do export devolve série vazia, sem quebrar', () => {
+  const s = hourlyCauseSeries([], '999', { maintenanceDate: '2026-07-07' })
+  assert.equal(s.inExport, false)
+  assert.deepEqual(s.hours, [])
+  assert.equal(s.total, 0)
+})
+
+test('o período escolhido no filtro recorta a série horária', () => {
+  const rows = ['2026-07-06', '2026-07-07', '2026-07-08', '2026-07-09'].map((d) => ({
+    vehicle: '707',
+    dayKey: d,
+    hour: 9,
+    isFov: true,
+    cause: 'camera misaligned',
+  }))
+  const s = hourlyCauseSeries(rows, '707', {
+    bounds: { from: '2026-07-07', to: '2026-07-08' },
+  })
+  assert.deepEqual(s.days, ['2026-07-07', '2026-07-08'])
+  assert.equal(s.values.length, 48)
+  assert.equal(s.total, 2, 'só as horas dentro do período pedido')
 })
